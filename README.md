@@ -2,6 +2,12 @@
 
 A high performance video and audio stream processor for Scrooby 
 
+## Specification
+
+We use a MPEG-TS container with
+* H264 for video
+* MP2 for audio
+
 ## Setup
 
 The following procedure was done with a Mac but can easily be done with any OS.
