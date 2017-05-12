@@ -1,32 +1,5 @@
 /*
- * Copyright (c) 2003 Fabrice Bellard
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
-
-/**
- * @file
- * libavformat API example.
- *
- * Output a media file in any supported libavformat format. The default
- * codecs are used.
- * @example muxing.c
+ * Captures camera and microphone and sends it to a destination
  */
 
 #include <stdlib.h>
@@ -46,7 +19,6 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_thread.h>
 
-#define STREAM_DURATION   30000000000.0
 #define STREAM_FRAME_RATE 25 /* 25 images/s */
 #define STREAM_PIX_FMT    AV_PIX_FMT_YUV420P /* default pix_fmt */
 
@@ -396,30 +368,6 @@ static AVFrame *get_audio_frame(OutputStream *ost)
             }
         }
     }
-
-    
-    
-//    AVFrame *frame = ost->tmp_frame;
-//    int j, i, v;
-//    int16_t *q = (int16_t*)frame->data[0];
-//
-//    /* check if we want to generate more frames */
-//    if (av_compare_ts(ost->next_pts, ost->enc->time_base,
-//                      STREAM_DURATION, (AVRational){ 1, 1 }) >= 0)
-//        return NULL;
-//
-//    for (j = 0; j <frame->nb_samples; j++) {
-//        v = (int)(sin(ost->t) * 10000);
-//        for (i = 0; i < ost->enc->channels; i++)
-//            *q++ = v;
-//        ost->t     += ost->tincr;
-//        ost->tincr += ost->tincr2;
-//    }
-//
-//    frame->pts = ost->next_pts;
-//    ost->next_pts  += frame->nb_samples;
-//
-//    return frame;
 }
 
 
@@ -575,57 +523,9 @@ static void open_video(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, A
     }
 }
 
-/* Prepare a dummy image. */
-static void fill_yuv_image(AVFrame *pict, int frame_index,
-                           int width, int height)
-{
-    
-    int x, y, i;
-
-    i = frame_index;
-
-    /* Y */
-    for (y = 0; y < height; y++)
-        for (x = 0; x < width; x++)
-            pict->data[0][y * pict->linesize[0] + x] = x + y + i * 3;
-
-    /* Cb and Cr */
-    for (y = 0; y < height / 2; y++) {
-        for (x = 0; x < width / 2; x++) {
-            pict->data[1][y * pict->linesize[1] + x] = 128 + y + i * 2;
-            pict->data[2][y * pict->linesize[2] + x] = 64 + x + i * 5;
-        }
-    }
-}
-
-static void pgm_save(unsigned char *buf, int wrap, int xsize, int ysize,
-                     char *filename)
-{
-    FILE *f;
-    int i;
-    f=fopen(filename,"w");
-    fprintf(f,"P5\n%d %d\n%d\n",xsize,ysize,255);
-    for(i=0;i<ysize;i++)
-        fwrite(buf + i * wrap,1,xsize,f);
-    fclose(f);
-}
-int frame = 0;
-
-static int static_pts = 0;
-int nextPTS()
-{
-    return static_pts ++;
-}
-
-static AVFrame *get_video_frame(OutputStream *ost)
-{
+static AVFrame *get_video_frame(OutputStream *ost) {
     
     AVCodecContext *c = ost->enc;
-
-    /* check if we want to generate more frames */
-    if (av_compare_ts(ost->next_pts, c->time_base,
-                      STREAM_DURATION, (AVRational){ 1, 1 }) >= 0)
-        return NULL;
 
     /* when we pass a frame to the encoder, it may keep a reference to it
      * internally; make sure we do not overwrite it here */
@@ -633,8 +533,6 @@ static AVFrame *get_video_frame(OutputStream *ost)
 //        printf("WHAAAAT\n");
 //        exit(1);
 //    }
-    
-
     
     //char buf[8000];
     int ret = av_read_frame(pCamFormatCtx, &camPacket);
@@ -669,32 +567,6 @@ static AVFrame *get_video_frame(OutputStream *ost)
             return ost->frame;
         }
     }
-
-    
-//    if (c->pix_fmt != AV_PIX_FMT_YUV420P) {
-//        /* as we only generate a YUV420P picture, we must convert it
-//         * to the codec pixel format if needed */
-//        if (!ost->sws_ctx) {
-//            ost->sws_ctx = sws_getContext(c->width, c->height,
-//                                          AV_PIX_FMT_YUV420P,
-//                                          c->width, c->height,
-//                                          c->pix_fmt,
-//                                          SCALE_FLAGS, NULL, NULL, NULL);
-//            if (!ost->sws_ctx) {
-//                fprintf(stderr,
-//                        "Could not initialize the conversion context\n");
-//                exit(1);
-//            }
-//        }
-//        fill_yuv_image(ost->tmp_frame, ost->next_pts, c->width, c->height);
-//        sws_scale(ost->sws_ctx,
-//                  (const uint8_t * const *)ost->tmp_frame->data, ost->tmp_frame->linesize,
-//                  0, c->height, ost->frame->data, ost->frame->linesize);
-//    } else {
-//        fill_yuv_image(ost->frame, ost->next_pts, c->width, c->height);
-//    }
-//
-//    ost->frame->pts = ost->next_pts++;
 
     return ost->frame;
 }
@@ -747,11 +619,8 @@ static void close_stream(AVFormatContext *oc, OutputStream *ost)
     swr_free(&ost->swr_ctx);
 }
 
-/**************************************************************/
-/* media file output */
-
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
+    
     Container container = { 0 };
     OutputStream video_st = { 0 }, audio_st = { 0 };
     const char *filename;
