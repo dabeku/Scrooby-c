@@ -1,3 +1,3 @@
 # Scrooby-c
 
-The high performance video and audio stream processor for Scrooby 
+A high performance video and audio stream processor for Scrooby 
