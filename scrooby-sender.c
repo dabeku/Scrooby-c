@@ -621,11 +621,13 @@ static void close_stream(AVFormatContext *oc, OutputStream *ost)
 
 int main(int argc, char **argv) {
     
+    const char *url = "udp://127.0.0.1:1234";
+    
     Container container = { 0 };
     OutputStream video_st = { 0 }, audio_st = { 0 };
-    const char *filename;
-    AVOutputFormat *fmt;
-    AVFormatContext *oc;
+    
+    AVFormatContext *outputContext = NULL;
+    AVOutputFormat *outputFormat = NULL;
     AVCodec *audio_codec, *video_codec;
     int ret;
     int have_video = 0, have_audio = 0;
@@ -633,64 +635,57 @@ int main(int argc, char **argv) {
     AVDictionary *opt = NULL;
     int i;
 
-    /* Initialize libavcodec, and register all codecs and formats. */
+    // Initialize libavcodec, and register all codecs and formats
     av_register_all();
-    
+    // Register all devices (camera, microphone, screen, etc.)
     avdevice_register_all();
+    // Initialize networking
     avformat_network_init();
 
-    filename = "udp://127.0.0.1:1234";
-
-    /* allocate the output media context */
-    avformat_alloc_output_context2(&oc, NULL, "mpegts", filename);
-    if (!oc) {
-        printf("Could not deduce output format from file extension: using MPEG.\n");
-        avformat_alloc_output_context2(&oc, NULL, "mpeg", filename);
-    } else {
-        printf("Use mpegts\n");
-    }
-    if (!oc)
+    // Allocate the output media context (mpeg-ts container)
+    avformat_alloc_output_context2(&outputContext, NULL, "mpegts", url);
+    if (!outputContext) {
         return 1;
+    }
 
-    fmt = oc->oformat;
+    outputFormat = outputContext->oformat;
 
-    /* Add the audio and video streams using the default format codecs
-     * and initialize the codecs. */
-    if (fmt->video_codec != AV_CODEC_ID_NONE) {
-        //add_stream(&video_st, oc, &video_codec, fmt->video_codec);
-        add_stream(&video_st, oc, &video_codec, AV_CODEC_ID_H264);
-        
+    // Add the audio and video streams.
+    if (outputFormat->video_codec != AV_CODEC_ID_NONE) {
+        // Default: outputFormat->video_codec (=2, AV_CODEC_ID_MPEG2VIDEO) instead of AV_CODEC_ID_H264 (=28)
+        add_stream(&video_st, outputContext, &video_codec, AV_CODEC_ID_H264);
         have_video = 1;
         encode_video = 1;
     }
-    if (fmt->audio_codec != AV_CODEC_ID_NONE) {
-        add_stream(&audio_st, oc, &audio_codec, fmt->audio_codec);
+    if (outputFormat->audio_codec != AV_CODEC_ID_NONE) {
+        // Default: outputFormat->audio_codec (=86016) is equal to AV_CODEC_ID_MP2 (=86016)
+        add_stream(&audio_st, outputContext, &audio_codec, AV_CODEC_ID_MP2);
         have_audio = 1;
         encode_audio = 1;
     }
 
-    /* Now that all the parameters are set, we can open the audio and
-     * video codecs and allocate the necessary encode buffers. */
-    if (have_video)
-        open_video(oc, video_codec, &video_st, opt);
+    // Now that all the parameters are set, we can open the audio and
+    // video codecs and allocate the necessary encode buffers.
+    if (have_video) {
+        open_video(outputContext, video_codec, &video_st, opt);
+    }
+    if (have_audio) {
+        open_audio(outputContext, audio_codec, &audio_st, opt);
+    }
 
-    if (have_audio)
-        open_audio(oc, audio_codec, &audio_st, opt);
-
-    av_dump_format(oc, 0, filename, 1);
+    av_dump_format(outputContext, 0, url, 1);
 
     /* open the output file, if needed */
-    if (!(fmt->flags & AVFMT_NOFILE)) {
-        ret = avio_open(&oc->pb, filename, AVIO_FLAG_WRITE);
+    if (!(outputFormat->flags & AVFMT_NOFILE)) {
+        ret = avio_open(&outputContext->pb, url, AVIO_FLAG_WRITE);
         if (ret < 0) {
-            fprintf(stderr, "Could not open '%s': %s\n", filename,
-                    av_err2str(ret));
+            fprintf(stderr, "Could not open '%s': %s\n", url, av_err2str(ret));
             return 1;
         }
     }
 
     /* Write the stream header, if any. */
-    ret = avformat_write_header(oc, &opt);
+    ret = avformat_write_header(outputContext, &opt);
     if (ret < 0) {
         fprintf(stderr, "Error occurred when opening output file: %s\n",
                 av_err2str(ret));
@@ -835,13 +830,13 @@ int main(int argc, char **argv) {
     
     
     container.outputStream = &audio_st;
-    container.formatContext = oc;
+    container.formatContext = outputContext;
     audio_thread = SDL_CreateThread(write_audio, "write_audio", &container);
     
     while (encode_video || encode_audio) {
         
         printf("... Video\n");
-        encode_video = !write_video_frame(oc, &video_st);
+        encode_video = !write_video_frame(outputContext, &video_st);
 //        printf("... Audio\n");
 //        encode_audio = !write_audio_frame(oc, &audio_st);
         
@@ -877,20 +872,20 @@ int main(int argc, char **argv) {
      * close the CodecContexts open when you wrote the header; otherwise
      * av_write_trailer() may try to use memory that was freed on
      * av_codec_close(). */
-    av_write_trailer(oc);
+    av_write_trailer(outputContext);
 
     /* Close each codec. */
     if (have_video)
-        close_stream(oc, &video_st);
+        close_stream(outputContext, &video_st);
     if (have_audio)
-        close_stream(oc, &audio_st);
+        close_stream(outputContext, &audio_st);
 
-    if (!(fmt->flags & AVFMT_NOFILE))
+    if (!(outputFormat->flags & AVFMT_NOFILE))
         /* Close the output file. */
-        avio_closep(&oc->pb);
+        avio_closep(&outputContext->pb);
 
     /* free the stream */
-    avformat_free_context(oc);
+    avformat_free_context(outputContext);
 
     return 0;
 }
