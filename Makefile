@@ -1,4 +1,6 @@
-CC=gcc
+CC = gcc
+
+DEPS = sc-statuscode.h
 
 # use pkg-config for getting CFLAGS and LDLIBS
 FFMPEG_LIBS=    libavdevice                        \
@@ -16,7 +18,7 @@ LDLIBS := $(shell pkg-config --libs $(FFMPEG_LIBS)) $(shell sdl2-config --libs) 
 SCROOBY=        scrooby-sender                     \
 	       	scrooby-player
 
-OBJS=$(addsuffix .o,$(SCROOBY))
+OBJS = $(addsuffix .o,$(SCROOBY)) $(DEPS)
 
 all: $(OBJS) $(SCROOBY)
 

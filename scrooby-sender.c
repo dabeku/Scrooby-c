@@ -19,6 +19,8 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_thread.h>
 
+#include "sc-statuscode.h"
+
 #define STREAM_FRAME_RATE 25 /* 25 images/s */
 #define STREAM_PIX_FMT    AV_PIX_FMT_YUV420P /* default pix_fmt */
 
@@ -121,19 +123,15 @@ static int write_frame(AVFormatContext *fmt_ctx, const AVRational *time_base, AV
     return result;
 }
 
-/* Add an output stream. */
-static void add_stream(OutputStream *ost, AVFormatContext *oc,
-                       AVCodec **codec,
-                       enum AVCodecID codec_id)
-{
-    AVCodecContext *c;
+// Add an output stream
+static void add_stream(OutputStream *ost, AVFormatContext *oc, AVCodec **codec, enum AVCodecID codec_id) {
+    AVCodecContext *c = NULL;
     int i;
 
     /* find the encoder */
     *codec = avcodec_find_encoder(codec_id);
     if (!(*codec)) {
-        fprintf(stderr, "Could not find encoder for '%s'\n",
-                avcodec_get_name(codec_id));
+        fprintf(stderr, "[add_stream] Could not find encoder for '%s'\n", avcodec_get_name(codec_id));
         exit(1);
     }
 
@@ -645,7 +643,7 @@ int main(int argc, char **argv) {
     // Allocate the output media context (mpeg-ts container)
     avformat_alloc_output_context2(&outputContext, NULL, "mpegts", url);
     if (!outputContext) {
-        return 1;
+        return STATUS_CODE_NOK;
     }
 
     outputFormat = outputContext->oformat;
@@ -679,19 +677,17 @@ int main(int argc, char **argv) {
     if (!(outputFormat->flags & AVFMT_NOFILE)) {
         ret = avio_open(&outputContext->pb, url, AVIO_FLAG_WRITE);
         if (ret < 0) {
-            fprintf(stderr, "Could not open '%s': %s\n", url, av_err2str(ret));
-            return 1;
+            fprintf(stderr, "[main] Could not open '%s': %s\n", url, av_err2str(ret));
+            return STATUS_CODE_NOK;
         }
     }
 
     /* Write the stream header, if any. */
     ret = avformat_write_header(outputContext, &opt);
     if (ret < 0) {
-        fprintf(stderr, "Error occurred when opening output file: %s\n",
-                av_err2str(ret));
-        return 1;
+        fprintf(stderr, "[main] Error occurred when opening output file: %s\n", av_err2str(ret));
+        return STATUS_CODE_NOK;
     }
-    
     
     /*
      * Video
