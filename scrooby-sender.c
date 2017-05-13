@@ -19,7 +19,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_thread.h>
 
-#include "sc-statuscode.h"
+#include "scr-statuscode.h"
 
 #define STREAM_FRAME_RATE 25 /* 25 images/s */
 #define STREAM_PIX_FMT    AV_PIX_FMT_YUV420P /* default pix_fmt */

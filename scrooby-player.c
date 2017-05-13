@@ -18,9 +18,6 @@
 #include <time.h>
 #include <assert.h>
 
-#include <arpa/inet.h>
-#include <sys/socket.h>
-
 // Increase:
 // analyzeduration
 // probesize
@@ -28,18 +25,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_thread.h>
 
-//// A global buffer size just to have one
-//#define BUFFER_SIZE 640
-//
-//// The IP where the broadcast is sent to (the whole network)
-//#define DISCOVER_BROADCAST_IP "255.255.255.255"
-//// The port where the broadcast is sent to
-//#define DISCOVER_BROADCAST_PORT 51205
-//// The port we listen when waiting for streams
-//#define REGISTER_BROADCAST_PORT 51206
-//
-//#define RPI_COMMAND_IP "192.168.0.100"	// The ip of the rpi to send commands to
-//#define RPI_COMMAND_PORT 51200   		// The port of the rpi to send commands to
+#include "scr-network.h"
 
 #define FF_REFRESH_EVENT (SDL_USEREVENT)
 #define FF_QUIT_EVENT (SDL_USEREVENT + 1)
@@ -115,12 +101,9 @@ bool initSDL();
 bool createRenderer();
 void setupRenderer();
 
-void setupButtonPositions();
 SDL_mutex *screen_mutex = NULL;
 SDL_Window *gWindow = NULL;
 SDL_Renderer *renderer = NULL;
-SDL_Rect btnStart;
-SDL_Rect btnStop;
 
 // TODO: Put in VideoState
 size_t yPlaneSz, uvPlaneSz;
@@ -132,45 +115,6 @@ static  Uint32  audio_len;
 static  Uint8  *audio_pos;
 
 struct SwrContext *au_convert_ctx;
-
-#define SCROOBY_IP "127.0.0.1"
-#define SCROOBY_PORT 1235
-#define SCROOBY_BUFFER_SIZE 5000
-
-void network_send_udp(const void *data, size_t size) {
-    
-    int s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (s < 0) {
-        printf("Could not create socket");
-        exit(-1);
-    }
-    
-    struct sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = inet_addr(SCROOBY_IP);
-    addr.sin_port = htons(SCROOBY_PORT);
-
-    printf("Send data with length: %d", size);
-
-    int sizeLeftToSend = size;
-    for (int i = 0; i < size; i+=SCROOBY_BUFFER_SIZE) {
-        
-        int buffSizeToSend = SCROOBY_BUFFER_SIZE;
-        if (sizeLeftToSend < SCROOBY_BUFFER_SIZE) {
-            buffSizeToSend = sizeLeftToSend;
-        }
-        printf("Send: %d bytes\n", buffSizeToSend);
-        data = data + i;
-        
-        int result = sendto(s, data, buffSizeToSend, 0, (struct sockaddr *)&addr, sizeof(addr));
-        if (result < 0) {
-            printf("Could not send data. Result: %d\n", result);
-            exit(-1);
-        }
-        sizeLeftToSend -= SCROOBY_BUFFER_SIZE;
-    }
-}
-
 
 // Since we only have one decoding thread, the Big Struct can be global in case we need it.
 VideoState *global_video_state;
@@ -344,67 +288,14 @@ int audio_decode_frame(VideoState *is, uint8_t *audio_buf, int buf_size) {
 
 void audio_callback(void *userdata, Uint8 *stream, int len) {
     
-    pthread_t ptid = pthread_self();
-    //printf("Thread: %d\n", ptid);
-    
-//    printf("---> Callback called: %d\n", len);
-//    
-    //SDL 2.0
-    //SDL_memset(stream, 0, len);
-//
-//    VideoState *is = (VideoState *)userdata;
-//    int len1, audio_size;
-//    
-//    while(len > 0) {
-//        if(is->audio_buf_index >= is->audio_buf_size) {
-//            /* We have already sent all our data; get more */
-//            audio_size = audio_decode_frame(is, is->audio_buf, sizeof(is->audio_buf));
-//            if(audio_size < 0) {
-//                printf("TODO: Handle error\n");
-//                /* If error, output silence */
-//                //is->audio_buf_size = 1152;
-//                //memset(is->audio_buf, 0, is->audio_buf_size);
-//            } else {
-//                printf("Success: Decoded with size %d\n", audio_size);
-//                is->audio_buf_size = audio_size;
-//            }
-//            is->audio_buf_index = 0;
-//        }
-//        len1 = is->audio_buf_size - is->audio_buf_index;
-//        if(len1 > len)
-//            len1 = len;
-//        
-//        printf("Copy stuff with length %d / %d / %d\n", len1, is->audio_buf_index, stream);
-//        
-//        
-//        //SDL_MixAudio(stream, (uint8_t *)is->audio_buf + is->audio_buf_index, len1, SDL_MIX_MAXVOLUME);
-//        SDL_MixAudio(stream, (uint8_t *)is->audio_buf, len1, SDL_MIX_MAXVOLUME);
-//        //memcpy(stream, (uint8_t *)is->audio_buf + is->audio_buf_index, len1);
-//        
-//        
-//        len -= len1;
-//        stream += len1;
-//        is->audio_buf_index += len1;
-//    }
-//    
-//    printf("<--- Callback done: %d\n", len);
-
-    
-    
-    
-    //printf("---> Callback called: %d\n", len);
-    
     //SDL 2.0
     SDL_memset(stream, 0, len);
     
     VideoState *is = (VideoState *)userdata;
     int got_frame = 0;
     AVPacket *packet = &is->audio_pkt;
-    //AVFrame *pFrame = &is->audio_frame;
     
-    //printf("[audio_decode_frame] Get next packet\n");
     int ret = packet_queue_get(&is->audioq, packet, 0);
-    //printf("[audio_decode_frame] Get next packet -\n");
     if(ret < 0) {
         printf("Error.\n");
         return;
@@ -429,27 +320,7 @@ void audio_callback(void *userdata, Uint8 *stream, int len) {
         //printf("index:%5d\t pts:%d / %d\n",packet->pts,packet->size, ret);
     }
     SDL_MixAudio(stream, (uint8_t *)is->audio_buf, len, SDL_MIX_MAXVOLUME);
-    //SDL_Delay(10);
     av_packet_unref(packet);
-    //printf("<--- Callback done: %d\n", len);
-    
-    
-    
-    
-//    printf("Callback called: %d\n", len);
-//
-//    //SDL 2.0
-//    SDL_memset(stream, 0, len);
-//    
-//    if (audio_len ==0)
-//        return;
-//    
-//    len = ( len > audio_len ? audio_len : len );
-//    //SDL_memcpy (stream, audio_pos, len); 					// simply copy from one buffer into the other
-//    SDL_MixAudio(stream, audio_pos, len, SDL_MIX_MAXVOLUME);// mix from one buffer into another
-//    
-//    audio_pos += len;
-//    audio_len -= len;
 }
 
 bool initSDL() {
@@ -471,30 +342,12 @@ bool initSDL() {
             printf("[initSDL] Success: We're ready to go\n");
 			createRenderer();
 			setupRenderer();
-			setupButtonPositions();
 		}
 	}
 
 	return success;
 }
-//
-//void closeSDL() {
-//	//Destroy window
-//	SDL_DestroyWindow(gWindow);
-//	gWindow = NULL;
-//
-//	//Quit SDL subsystems
-//	SDL_Quit();
-//}
-//
-//void startTimer() {
-//	startTicks = SDL_GetTicks();
-//}
-//
-//int getTicks() {
-//	return SDL_GetTicks() - startTicks;
-//}
-//
+
 bool createRenderer() {
 	renderer = SDL_CreateRenderer(gWindow, -1, 0);
 	if (renderer == NULL) {
@@ -511,20 +364,7 @@ void setupRenderer() {
 	SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
 }
 
-void setupButtonPositions() {
-	// Start
-	btnStart.x = 10;
-	btnStart.y = 10;
-	btnStart.w = 100;
-	btnStart.h = 50;
-	// Stop
-	btnStop.x = 120;
-	btnStop.y = 10;
-	btnStop.w = 100;
-	btnStop.h = 50;
-}
-
-static Uint32 sdl_refresh_timer_cb(Uint32 interval, void *opaque) {
+Uint32 sdl_refresh_timer_cb(Uint32 interval, void *opaque) {
     SDL_Event event;
     event.type = FF_REFRESH_EVENT;
     event.user.data1 = opaque;
@@ -532,18 +372,8 @@ static Uint32 sdl_refresh_timer_cb(Uint32 interval, void *opaque) {
     return 0; /* 0 means stop timer */
 }
 
-static void schedule_refresh(VideoState *is, int delay) {
-    //printf("[main] Schedule refresh with delay %d.\n", delay);
+void schedule_refresh(VideoState *is, int delay) {
     SDL_AddTimer(delay, sdl_refresh_timer_cb, is);
-}
-
-void showButton(SDL_Rect rect) {
-	// Change color to blue
-	SDL_SetRenderDrawColor(renderer, 0, 100, 200, 255);
-	// Render our "player"
-	SDL_RenderFillRect(renderer, &rect);
-	// Change color to green
-	SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);
 }
 
 int decode(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
@@ -569,16 +399,13 @@ int decode(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt)
 }
 
 int queue_picture(VideoState *is, AVFrame *pFrame) {
-    //printf("[queue_picture]\n");
     
     VideoPicture *vp;
     int dst_pix_fmt;
-    //AVPicture pict;
     
-    /* wait until we have space for a new pic */
+    // Wait until we have space for a new pic
     SDL_LockMutex(is->pictq_mutex);
-    while(is->pictq_size >= VIDEO_PICTURE_QUEUE_SIZE &&
-          !is->quit) {
+    while(is->pictq_size >= VIDEO_PICTURE_QUEUE_SIZE && !is->quit) {
         SDL_CondWait(is->pictq_cond, is->pictq_mutex);
     }
     SDL_UnlockMutex(is->pictq_mutex);
@@ -586,28 +413,26 @@ int queue_picture(VideoState *is, AVFrame *pFrame) {
     if(is->quit)
         return -1;
     
-    // windex is set to 0 initially
     vp = &is->pictq[is->pictq_windex];
 
     if(is->texture) {
-        //printf("YES, texture is set. display it\n");
         
         AVFrame* pFrameYUV = av_frame_alloc();
         
         int numBytes = av_image_get_buffer_size(
-                                          AV_PIX_FMT_YUV420P,//PIX_FMT_YUV420P,
+                                          AV_PIX_FMT_YUV420P,
                                           is->video_ctx->width,
                                           is->video_ctx->height, 16);
-        uint8_t* buffer = (uint8_t *)av_malloc( numBytes*sizeof(uint8_t) );
+        uint8_t *buffer = (uint8_t *)av_malloc(numBytes*sizeof(uint8_t));
         
         av_image_fill_arrays (pFrameYUV->data, pFrameYUV->linesize, buffer, AV_PIX_FMT_YUV420P, is->video_ctx->width, is->video_ctx->height, 1);
         
-                pFrameYUV->data[0] = yPlane;
-                pFrameYUV->data[1] = uPlane;
-                pFrameYUV->data[2] = vPlane;
-                pFrameYUV->linesize[0] = is->video_ctx->width;
-                pFrameYUV->linesize[1] = uvPitch;
-                pFrameYUV->linesize[2] = uvPitch;
+        pFrameYUV->data[0] = yPlane;
+        pFrameYUV->data[1] = uPlane;
+        pFrameYUV->data[2] = vPlane;
+        pFrameYUV->linesize[0] = is->video_ctx->width;
+        pFrameYUV->linesize[1] = uvPitch;
+        pFrameYUV->linesize[2] = uvPitch;
         
         // Convert the image into YUV format that SDL uses
         sws_scale(is->sws_ctx, (uint8_t const * const *) pFrame->data,
@@ -617,7 +442,7 @@ int queue_picture(VideoState *is, AVFrame *pFrame) {
         av_frame_free(&pFrameYUV);
         av_free(buffer);
         
-        /* now we inform our display thread that we have a pic ready */
+        // Now we inform our display thread that we have a pic ready
         if(++is->pictq_windex == VIDEO_PICTURE_QUEUE_SIZE) {
             is->pictq_windex = 0;
         }
@@ -641,14 +466,14 @@ int frame_to_jpeg(VideoState *is, AVFrame *frame, int frameNo) {
     
     printf("Codec ctx: %d, %d\n", jpegContext->pix_fmt, jpegContext->bit_rate);
     
-    //jpegContext->pix_fmt = is->video_ctx->pix_fmt;
+    // JPEG requires special pixel format
     jpegContext->pix_fmt = AV_PIX_FMT_YUVJ420P;
     jpegContext->height = frame->height;
     jpegContext->width = frame->width;
     jpegContext->sample_aspect_ratio = is->video_ctx->sample_aspect_ratio;
     jpegContext->time_base = is->video_ctx->time_base;
 //    jpegContext->compression_level = 100;
-        jpegContext->compression_level = 0;
+    jpegContext->compression_level = 0;
     jpegContext->thread_count = 1;
     jpegContext->prediction_method = 1;
     jpegContext->flags2 = 0;
@@ -1026,8 +851,6 @@ void video_display(VideoState *is) {
         
         SDL_RenderClear(renderer);
         SDL_RenderCopy(renderer, is->texture, NULL, NULL);
-        showButton(btnStart);
-        showButton(btnStop);
         SDL_RenderPresent(renderer);
         
         SDL_UnlockMutex(screen_mutex);
@@ -1035,6 +858,7 @@ void video_display(VideoState *is) {
     
 }
 
+// Called by timer: Update video frame
 void video_refresh_timer(void *userdata) {
     
     VideoState *is = (VideoState *)userdata;
@@ -1045,19 +869,11 @@ void video_refresh_timer(void *userdata) {
             schedule_refresh(is, 1);
         } else {
             vp = &is->pictq[is->pictq_rindex];
-            /* Now, normally here goes a ton of code
-             about timing, etc. we're just going to
-             guess at a delay for now. You can
-             increase and decrease this value and hard code
-             the timing - but I don't suggest that ;)
-             We'll learn how to do it for real later.
-             */
+            // Do not wait as we process immediately
             schedule_refresh(is, 0);
-            
-            /* show the picture! */
+            // Show the picture
             video_display(is);
-            
-            /* update queue for next picture! */
+            // Update queue for next picture
             if(++is->pictq_rindex == VIDEO_PICTURE_QUEUE_SIZE) {
                 is->pictq_rindex = 0;
             }
@@ -1067,6 +883,7 @@ void video_refresh_timer(void *userdata) {
             SDL_UnlockMutex(is->pictq_mutex);
         }
     } else {
+        // Wait for the video stream
         schedule_refresh(is, 100);
     }
 }
@@ -1088,10 +905,8 @@ int main(int argc, char* argv[]) {
         return -1;
     }
     
-    // Show background and buttons
+    // Show background
     SDL_RenderClear(renderer);
-    showButton(btnStart);
-    showButton(btnStop);
     SDL_RenderPresent(renderer);
 
     printf("[main] Success: SDL initialized.\n");
@@ -1132,52 +947,5 @@ int main(int argc, char* argv[]) {
         }
     }
     
-//
-//		isRunning = true;
-//
-//		SDL_RenderClear(renderer);
-//		showButton(btnStart);
-//		showButton(btnStop);
-//		SDL_RenderPresent(renderer);
-//
-//		//pthread_create(&registerThread, NULL, registerStream, NULL);
-//
-//		// Event handler
-//		SDL_Event e;
-//
-//		while (isRunning) {
-//            // Handle events on queue
-//			//while (SDL_PollEvent(&e) != 0) {
-//			if (SDL_WaitEvent(&e) != 0) {
-//				//User requests quit
-//				if (e.type == SDL_QUIT) {
-//                    printf("Received quit event\n");
-//                    SDL_DestroyTexture(texture);
-//                    SDL_DestroyRenderer(renderer);
-//                    SDL_DestroyWindow(gWindow);
-//                    SDL_Quit();
-//					isRunning = false;
-//				}
-//
-//				if (e.type == SDL_MOUSEBUTTONDOWN) {
-//					int x = e.button.x;
-//					int y = e.button.y;
-//					//printf("Clicked with mouse: %d / %d\n", x, y);
-//					handleButtonClick(x, y);
-//				}
-//			}
-//
-//			// Update the surface
-//			//SDL_UpdateWindowSurface(gWindow);
-//		}
-//        
-//        printf("[main] Stopping\n");
-//	}
-//
-//	// Free resources and close SDL
-//	closeSDL();
-//	// Stop all threads
-//	pthread_join(registerThread, NULL);
-
 	return 0;
 }
