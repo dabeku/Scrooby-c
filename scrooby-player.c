@@ -121,18 +121,17 @@ void packet_queue_init(PacketQueue *q) {
 }
 int packet_queue_put(PacketQueue *q, AVPacket *pkt) {
     
-    
     AVPacketList *pkt1;
-    // TODO: use AVPacket tmp_pkt = {0}; instead
-    // TODO:
-    /*
-     ret = av_packet_ref(&tmp_pkt, pkt);
-     if (ret < 0)
-     exit_program(1);
-     */
-    if(av_dup_packet(pkt) < 0) {
+    
+    /*AVPacket *pkt_copy = NULL;
+    int ret = av_packet_ref(&pkt_copy, pkt);
+    if (ret < 0) {
         return -1;
-    }
+    }*/
+    
+    /*if(av_dup_packet(pkt) < 0) {
+        return -1;
+    }*/
     pkt1 = av_malloc(sizeof(AVPacketList));
     if (!pkt1)
         return -1;
@@ -153,6 +152,7 @@ int packet_queue_put(PacketQueue *q, AVPacket *pkt) {
     SDL_UnlockMutex(q->mutex);
     return 0;
 }
+
 static int packet_queue_get(PacketQueue *q, AVPacket *pkt, int block) {
     
     AVPacketList *pkt1 = NULL;
@@ -231,8 +231,9 @@ int audio_decode_frame(VideoState *is, uint8_t *audio_buf, int buf_size) {
             /* We have data, return it and come back for more later */
             return data_size;
         }
-        if(pkt->data)
-            av_free_packet(pkt);
+        if(pkt->data) {
+            av_packet_unref(pkt);
+        }
         
         if(is->quit) {
             return -1;
@@ -464,7 +465,7 @@ int frame_to_jpeg(VideoState *is, AVFrame *frame, int frameNo) {
     
     network_send_udp(packet.data, packet.size);
     
-    av_free_packet(&packet);
+    av_packet_unref(&packet);
     avcodec_close(jpegContext);
     return 0;
 }
