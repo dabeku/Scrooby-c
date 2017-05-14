@@ -47,11 +47,25 @@ brew install yasm
 ```
 
 ### SDL2.0 (threads, UI, mutex)
+
+See ![Installation Guide](https://wiki.libsdl.org/Installation)
+
 ```
-1. https://www.libsdl.org/download-2.0.php
-2. ./configure
-3. make
-4. sudo make install (defaults: /usr/local/lib + /usr/local/include/SDL2 + sdl2-config)
+1. Download latest version: https://www.libsdl.org/download-2.0.php
+2. Unpack into new folder
+3. Change to new folder
+```
+
+Better way (this will assure to be compatible with other OSx version)
+```
+4. mkdir build ; cd build ; CC=/where/i/cloned/SDL/build-scripts/gcc-fat.sh ../configure ; make
+```
+
+Also works (may cause incompatibilities)
+```
+4. ./configure
+5. make
+6. sudo make install (defaults: /usr/local/lib + /usr/local/include/SDL2 + sdl2-config)
 ```
 
 ## Building
