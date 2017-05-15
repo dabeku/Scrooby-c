@@ -21,7 +21,7 @@ brew install yasm
 ### libx264 (video)
 ```
 1. git clone http://git.videolan.org/git/x264.git x264
-2. ./configure --prefix=/usr/local --enable-shared
+2. ./configure --prefix=/usr/local --enable-static --enable-shared
 3. make
 4. sudo make install
 ```
@@ -41,7 +41,7 @@ brew install yasm
 ### ffmpeg (codec)
 ```
 1. git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg
-2. ./configure  --prefix=/usr/local --enable-gpl --enable-nonfree --enable-libfreetype --enable-libx264 --enable-libopus
+2. ./configure  --prefix=/usr/local --enable-gpl --enable-nonfree --enable-libfreetype --enable-libx264
 3. make
 4. sudo make install
 ```
