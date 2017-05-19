@@ -189,6 +189,78 @@ static int packet_queue_get(PacketQueue *q, AVPacket *pkt, int block) {
     return ret;
 }
 
+static int decode(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
+    int ret;
+    
+    *got_frame = 0;
+    
+    if (pkt) {
+        ret = avcodec_send_packet(avctx, pkt);
+        // In particular, we don't expect AVERROR(EAGAIN), because we read all
+        // decoded frames with avcodec_receive_frame() until done.
+        if (ret < 0)
+            return ret == AVERROR_EOF ? 0 : ret;
+    }
+    
+    ret = avcodec_receive_frame(avctx, frame);
+    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
+        return ret;
+    if (ret >= 0)
+        *got_frame = 1;
+    
+    return 0;
+}
+
+static int decode_video(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
+    
+    return decode(avctx, frame, got_frame, pkt);
+    
+//    int ret;
+//    
+//    *got_frame = 0;
+//    
+//    if (pkt) {
+//        ret = avcodec_send_packet(avctx, pkt);
+//        // In particular, we don't expect AVERROR(EAGAIN), because we read all
+//        // decoded frames with avcodec_receive_frame() until done.
+//        if (ret < 0)
+//            return ret == AVERROR_EOF ? 0 : ret;
+//    }
+//    
+//    ret = avcodec_receive_frame(avctx, frame);
+//    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
+//        return ret;
+//    if (ret >= 0)
+//        *got_frame = 1;
+//    
+//    return 0;
+}
+
+static int decode_audio(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
+    
+    return decode(avctx, frame, got_frame, pkt);
+//    int ret;
+//    
+//    *got_frame = 0;
+//    
+//    if (pkt) {
+//        ret = avcodec_send_packet(avctx, pkt);
+//        // In particular, we don't expect AVERROR(EAGAIN), because we read all
+//        // decoded frames with avcodec_receive_frame() until done.
+//        if (ret < 0)
+//            return ret == AVERROR_EOF ? 0 : ret;
+//    }
+//    
+//    ret = avcodec_receive_frame(avctx, frame);
+//    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
+//        return ret;
+//    if (ret >= 0)
+//        *got_frame = 1;
+//    
+//    return 0;
+
+}
+/*
 int audio_decode_frame(VideoState *is, uint8_t *audio_buf, int buf_size) {
     
     int len1, data_size = 0;
@@ -224,11 +296,9 @@ int audio_decode_frame(VideoState *is, uint8_t *audio_buf, int buf_size) {
             is->audio_pkt_size -= len1;
             if(data_size <= 0) {
                 //printf("[audio_decode_frame] No data yet, get more frames\n");
-                /* No data yet, get more frames */
                 continue;
             }
             //printf("[audio_decode_frame] We have data. Size: %d\n", data_size);
-            /* We have data, return it and come back for more later */
             return data_size;
         }
         if(pkt->data) {
@@ -238,7 +308,6 @@ int audio_decode_frame(VideoState *is, uint8_t *audio_buf, int buf_size) {
         if(is->quit) {
             return -1;
         }
-        /* next packet */
         //printf("[audio_decode_frame] Get next packet\n");
         int ret = packet_queue_get(&is->audioq, pkt, 1);
         //printf("[audio_decode_frame] Get next packet -\n");
@@ -249,7 +318,7 @@ int audio_decode_frame(VideoState *is, uint8_t *audio_buf, int buf_size) {
         is->audio_pkt_data = pkt->data;
         is->audio_pkt_size = pkt->size;
     }
-}
+}*/
 
 void audio_callback(void *userdata, Uint8 *stream, int len) {
     
@@ -270,20 +339,23 @@ void audio_callback(void *userdata, Uint8 *stream, int len) {
         return;
     }
     
-    ret = avcodec_decode_audio4( is->audio_ctx, &is->audio_frame, &got_frame, packet);
-    if ( ret < 0 ) {
+    AVFrame *pFrame = &is->audio_frame;
+    
+    ret = decode_audio( is->audio_ctx, &is->audio_frame, &got_frame, packet);
+    //ret = decode(is->audio_ctx, &is->audio_frame, &got_frame, packet);
+    //ret = avcodec_decode_audio4( is->audio_ctx, &is->audio_frame, &got_frame, packet);
+
+    if (ret < 0) {
         printf("Error in decoding audio frame.\n");
         av_packet_unref(packet);
         return;
     }
     
     uint8_t *audio_buf = is->audio_buf;
-    if (got_frame > 0) {
-        AVFrame *pFrame = &is->audio_frame;
-        printf("PTS (audio): %d\n", pFrame->pts);
-        ret = swr_convert(au_convert_ctx, &audio_buf,MAX_AUDIO_FRAME_SIZE, (const uint8_t **)pFrame->data, pFrame->nb_samples);
-        //printf("index:%5d\t pts:%d / %d\n",packet->pts,packet->size, ret);
-    }
+    printf("PTS (audio): %d\n", pFrame->pts);
+    ret = swr_convert(au_convert_ctx, &audio_buf,MAX_AUDIO_FRAME_SIZE, (const uint8_t **)pFrame->data, pFrame->nb_samples);
+    //printf("index:%5d\t pts:%d / %d\n",packet->pts,packet->size, ret);
+
     SDL_MixAudio(stream, (uint8_t *)is->audio_buf, len, SDL_MIX_MAXVOLUME);
     av_packet_unref(packet);
 }
@@ -341,27 +413,7 @@ void schedule_refresh(VideoState *is, int delay) {
     SDL_AddTimer(delay, sdl_refresh_timer_cb, is);
 }
 
-int decode(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
-    int ret;
-    
-    *got_frame = 0;
-    
-    if (pkt) {
-        ret = avcodec_send_packet(avctx, pkt);
-        // In particular, we don't expect AVERROR(EAGAIN), because we read all
-        // decoded frames with avcodec_receive_frame() until done.
-        if (ret < 0)
-            return ret == AVERROR_EOF ? 0 : ret;
-    }
-    
-    ret = avcodec_receive_frame(avctx, frame);
-    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
-        return ret;
-    if (ret >= 0)
-        *got_frame = 1;
-    
-    return 0;
-}
+
 
 int queue_picture(VideoState *is, AVFrame *pFrame) {
     
@@ -490,7 +542,14 @@ int video_thread(void *arg) {
             // Means we quit getting packets
             break;
         }
-        decode(is->video_ctx, pFrame, &frameFinished, packet);
+        int ret = decode_video(is->video_ctx, pFrame, &frameFinished, packet);
+        //int ret = decode_audio(is->video_ctx, pFrame, packet);
+        if ( ret < 0 ) {
+            printf("Error in decoding video frame.\n");
+            av_packet_unref(packet);
+            return -1;
+        }
+        
         // Did we get a video frame?
         if (frameFinished) {
             count++;
@@ -502,7 +561,7 @@ int video_thread(void *arg) {
                 break;
             }      
         } else {
-            //printf("[video_thread] Frame is NOT finished.\n");
+            printf("[video_thread] Frame is NOT finished.\n");
         }
         
         av_packet_unref(packet);
