@@ -25,6 +25,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_thread.h>
 
+#include "scr-statuscode.h"
 #include "scr-network.h"
 
 #define FF_REFRESH_EVENT (SDL_USEREVENT)
@@ -92,10 +93,7 @@ typedef struct VideoState {
 
 const int SCREEN_WIDTH = 640;
 const int SCREEN_HEIGHT = 480;
-//const int FRAMES_PER_SECOND = 10;
-//
-//bool isRunning;
-//
+
 bool initSDL();
 bool createRenderer();
 void setupRenderer();
@@ -198,127 +196,28 @@ static int decode(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacke
         ret = avcodec_send_packet(avctx, pkt);
         // In particular, we don't expect AVERROR(EAGAIN), because we read all
         // decoded frames with avcodec_receive_frame() until done.
-        if (ret < 0)
+        if (ret < 0) {
             return ret == AVERROR_EOF ? 0 : ret;
+        }
     }
     
     ret = avcodec_receive_frame(avctx, frame);
-    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
+    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
         return ret;
-    if (ret >= 0)
+    } else if (ret >= 0) {
         *got_frame = 1;
+    }
     
     return 0;
 }
 
 static int decode_video(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
-    
     return decode(avctx, frame, got_frame, pkt);
-    
-//    int ret;
-//    
-//    *got_frame = 0;
-//    
-//    if (pkt) {
-//        ret = avcodec_send_packet(avctx, pkt);
-//        // In particular, we don't expect AVERROR(EAGAIN), because we read all
-//        // decoded frames with avcodec_receive_frame() until done.
-//        if (ret < 0)
-//            return ret == AVERROR_EOF ? 0 : ret;
-//    }
-//    
-//    ret = avcodec_receive_frame(avctx, frame);
-//    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
-//        return ret;
-//    if (ret >= 0)
-//        *got_frame = 1;
-//    
-//    return 0;
 }
 
 static int decode_audio(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
-    
     return decode(avctx, frame, got_frame, pkt);
-//    int ret;
-//    
-//    *got_frame = 0;
-//    
-//    if (pkt) {
-//        ret = avcodec_send_packet(avctx, pkt);
-//        // In particular, we don't expect AVERROR(EAGAIN), because we read all
-//        // decoded frames with avcodec_receive_frame() until done.
-//        if (ret < 0)
-//            return ret == AVERROR_EOF ? 0 : ret;
-//    }
-//    
-//    ret = avcodec_receive_frame(avctx, frame);
-//    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
-//        return ret;
-//    if (ret >= 0)
-//        *got_frame = 1;
-//    
-//    return 0;
-
 }
-/*
-int audio_decode_frame(VideoState *is, uint8_t *audio_buf, int buf_size) {
-    
-    int len1, data_size = 0;
-    AVPacket *pkt = &is->audio_pkt;
-    
-    for(;;) {
-        while(is->audio_pkt_size > 0) {
-            int got_frame = 0;
-            len1 = avcodec_decode_audio4(is->audio_ctx, &is->audio_frame, &got_frame, pkt);
-            if(len1 < 0) {
-                // If error, skip frame
-                is->audio_pkt_size = 0;
-                break;
-            }
-            data_size = 0;
-            if(got_frame) {
-                AVFrame *pFrame = &is->audio_frame;
-                printf("PTS (audio): %lld\n", pFrame->pts);
-                swr_convert(au_convert_ctx,&audio_buf, MAX_AUDIO_FRAME_SIZE,(const uint8_t **)pFrame->data , pFrame->nb_samples);
-                
-                data_size = av_samples_get_buffer_size(NULL,
-                                                       is->audio_ctx->channels,
-                                                       is->audio_frame.nb_samples,
-                                                       is->audio_ctx->sample_fmt,
-                                                       1);
-                assert(data_size <= buf_size);
-                //memcpy(audio_buf, is->audio_frame.data[0], data_size);
-            } else {
-                //printf("[audio_decode_frame] We NOT GOT a frame, wait for it\n");
-            }
-                
-            is->audio_pkt_data += len1;
-            is->audio_pkt_size -= len1;
-            if(data_size <= 0) {
-                //printf("[audio_decode_frame] No data yet, get more frames\n");
-                continue;
-            }
-            //printf("[audio_decode_frame] We have data. Size: %d\n", data_size);
-            return data_size;
-        }
-        if(pkt->data) {
-            av_packet_unref(pkt);
-        }
-        
-        if(is->quit) {
-            return -1;
-        }
-        //printf("[audio_decode_frame] Get next packet\n");
-        int ret = packet_queue_get(&is->audioq, pkt, 1);
-        //printf("[audio_decode_frame] Get next packet -\n");
-        if(ret < 0) {
-            return -1;
-        }
-        //printf("[audio_decode_frame] Get next packet: DONE. Size: %d\n", pkt->size);
-        is->audio_pkt_data = pkt->data;
-        is->audio_pkt_size = pkt->size;
-    }
-}*/
 
 void audio_callback(void *userdata, Uint8 *stream, int len) {
     
@@ -352,7 +251,7 @@ void audio_callback(void *userdata, Uint8 *stream, int len) {
     }
     
     uint8_t *audio_buf = is->audio_buf;
-    printf("PTS (audio): %d\n", pFrame->pts);
+    printf("PTS (audio): %lld\n", pFrame->pts);
     ret = swr_convert(au_convert_ctx, &audio_buf,MAX_AUDIO_FRAME_SIZE, (const uint8_t **)pFrame->data, pFrame->nb_samples);
     //printf("index:%5d\t pts:%d / %d\n",packet->pts,packet->size, ret);
 
@@ -486,10 +385,10 @@ int frame_to_jpeg(VideoState *is, AVFrame *frame, int frameNo) {
     jpegContext->width = frame->width;
     jpegContext->sample_aspect_ratio = is->video_ctx->sample_aspect_ratio;
     jpegContext->time_base = is->video_ctx->time_base;
-//    jpegContext->compression_level = 100;
     jpegContext->compression_level = 0;
     jpegContext->thread_count = 1;
-    jpegContext->prediction_method = 1;
+    // Comment since deprecated
+//    jpegContext->prediction_method = 1;
     jpegContext->flags2 = 0;
     //jpegContext->rc_max_rate = jpegContext->rc_min_rate = jpegContext->bit_rate = 80000000;
     
@@ -577,22 +476,26 @@ int stream_component_open(VideoState *is, int stream_index) {
     AVCodec *codec = NULL;
     SDL_AudioSpec wanted_spec, spec;
     
-    if(stream_index < 0 || stream_index >= pFormatCtx->nb_streams) {
-        return -1;
+    if (stream_index < 0 || stream_index >= pFormatCtx->nb_streams) {
+        printf("[stream_component_open] Invalid stream index.\n");
+        return STATUS_CODE_INVALID_STREAM_INDEX;
     }
     
-    codec = avcodec_find_decoder(pFormatCtx->streams[stream_index]->codec->codec_id);
-    if(!codec) {
-        fprintf(stderr, "Unsupported codec!\n");
-        return -1;
+    codec = avcodec_find_decoder(pFormatCtx->streams[stream_index]->codecpar->codec_id);
+    if (!codec) {
+        printf("[stream_component_open] Can't find codec.\n");
+        return STATUS_CODE_CANT_FIND_CODEC;
     }
     
     codecCtx = avcodec_alloc_context3(codec);
-    if(avcodec_copy_context(codecCtx, pFormatCtx->streams[stream_index]->codec) != 0) {
-        fprintf(stderr, "Couldn't copy codec context");
-        return -1; // Error copying codec context
+    if (avcodec_parameters_to_context(codecCtx, pFormatCtx->streams[stream_index]->codecpar) < 0) {
+        printf("Failed to copy codec parameters to decoder context\n");
+        return STATUS_CODE_CANT_COPY_CODEC;
     }
-    
+    /*if(avcodec_copy_context(codecCtx, pFormatCtx->streams[stream_index]->codec) != 0) {
+        printf("[stream_component_open] Couldn't copy codec context.\n");
+        return -1;
+    }*/
     
     if(codecCtx->codec_type == AVMEDIA_TYPE_AUDIO) {
         // We want:
@@ -610,13 +513,13 @@ int stream_component_open(VideoState *is, int stream_index) {
         wanted_spec.userdata = is;
         
         if(SDL_OpenAudio(&wanted_spec, &spec) < 0) {
-            fprintf(stderr, "SDL_OpenAudio: %s\n", SDL_GetError());
-            return -1;
+            printf("[stream_component_open] Can't open SDL Audio: %s.\n", SDL_GetError());
+            return STATUS_CODE_SDL_CANT_OPEN_AUDIO;
         }
     }
-    if(avcodec_open2(codecCtx, codec, NULL) < 0) {
-        fprintf(stderr, "Unsupported codec!\n");
-        return -1;
+    if (avcodec_open2(codecCtx, codec, NULL) < 0) {
+        printf("[stream_component_open] Can't open codec.\n");
+        return STATUS_CODE_CANT_OPEN_CODEC;
     }
     
     switch(codecCtx->codec_type) {
@@ -629,14 +532,18 @@ int stream_component_open(VideoState *is, int stream_index) {
             memset(&is->audio_pkt, 0, sizeof(is->audio_pkt));
             packet_queue_init(&is->audioq);
             SDL_PauseAudio(0);
-            printf("Openend audio\n");
             break;
         case AVMEDIA_TYPE_VIDEO:
+            
+            if (codecCtx->width == 0 || codecCtx->height == 0) {
+                printf("[stream_component_open] Can't find codec information: width and height\n");
+                return STATUS_CODE_MISSING_VIDEO_CODEC_INFO;
+            }
+            
             is->videoStream = stream_index;
             is->video_st = pFormatCtx->streams[stream_index];
             is->video_ctx = codecCtx;
             packet_queue_init(&is->videoq);
-            // TODO: Do not forget to enable
             is->video_tid = SDL_CreateThread(video_thread, "video_thread", is);
             is->sws_ctx = sws_getContext(is->video_ctx->width, is->video_ctx->height,
                                          is->video_ctx->pix_fmt, is->video_ctx->width,
@@ -654,18 +561,21 @@ int stream_component_open(VideoState *is, int stream_index) {
             uPlane = (Uint8*) malloc(uvPlaneSz);
             vPlane = (Uint8*) malloc(uvPlaneSz);
             if (!yPlane || !uPlane || !vPlane) {
-                fprintf(stderr, "Could not allocate pixel buffers - exiting\n");
-                exit(1);
+                printf("[stream_component_open] Can't allocate pixel buffers.\n");
+                return STATUS_CODE_CANT_ALLOCATE_PIXEL_BUFFERS;
             }
-            printf("Openend video\n");
             break;
         default:
             break;
     }
+    
+    return STATUS_CODE_OK;
 }
 
 int decode_thread(void *arg) {
-    //printf("[decode_thread] Called.\n");
+    
+    // Hold the status of the last function call
+    int result = 0;
     
     VideoState *is = (VideoState *)arg;
     AVFormatContext *pFormatCtx = NULL;
@@ -681,10 +591,12 @@ int decode_thread(void *arg) {
     is->videoStream = -1;
     global_video_state = is;
     
-    int testing = 1;
-    while (testing == 1) {
+    int isInitialized = 0;
+    while (isInitialized == 0) {
         
-        AVInputFormat *inputFormat =av_find_input_format("mpegts");
+        printf("[decode_thread] Start initialization\n");
+        
+        AVInputFormat *inputFormat = av_find_input_format("mpegts");
         
         int result = avformat_open_input(&pFormatCtx, is->url, inputFormat, NULL);
         if (result != 0) {
@@ -728,15 +640,30 @@ int decode_thread(void *arg) {
         
         if (video_index < 0) {
             printf("[decode_thread] Could not find a video stream.\n");
-            return -1;
+            avformat_close_input(&pFormatCtx);
+            continue;
         }
         if (audio_index < 0) {
             printf("[decode_thread] Could not find a audio stream.\n");
-            return -1;
+            avformat_close_input(&pFormatCtx);
+            continue;
         }
         
-        stream_component_open(is, video_index);
-        stream_component_open(is, audio_index);
+        result = stream_component_open(is, video_index);
+        if (result < 0) {
+            printf("[decode_thread] Could not open video: %d.\n", result);
+            avformat_close_input(&pFormatCtx);
+            continue;
+        }
+        result = stream_component_open(is, audio_index);
+        if (result < 0) {
+            printf("[decode_thread] Could not open video: %d.\n", result);
+            avformat_close_input(&pFormatCtx);
+            continue;
+        }
+        
+        // We have all we need
+        isInitialized = 1;
         
         // Get a pointer to the codec context for the audio stream
         pCodecCtx=pFormatCtx->streams[audio_index]->codec;
@@ -892,6 +819,8 @@ int main(int argc, char* argv[]) {
     VideoState      *is;
     
     is = av_mallocz(sizeof(VideoState));
+    
+    av_log_set_level(AV_LOG_QUIET);
     
     // Register all formats and codecs
     av_register_all();
