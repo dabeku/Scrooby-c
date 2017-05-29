@@ -495,7 +495,7 @@ int video_thread(void *arg) {
 int stream_component_open(VideoState *is, int stream_index) {
     
     AVFormatContext *pFormatCtx = is->pFormatCtx;
-    AVCodecContext *codecCtx = NULL;
+    AVCodecContext *pCodecCtx = NULL;
     AVCodec *codec = NULL;
     SDL_AudioSpec wanted_spec, spec;
     
@@ -510,8 +510,8 @@ int stream_component_open(VideoState *is, int stream_index) {
         return STATUS_CODE_CANT_FIND_CODEC;
     }
     
-    codecCtx = avcodec_alloc_context3(codec);
-    if (avcodec_parameters_to_context(codecCtx, pFormatCtx->streams[stream_index]->codecpar) < 0) {
+    pCodecCtx = avcodec_alloc_context3(codec);
+    if (avcodec_parameters_to_context(pCodecCtx, pFormatCtx->streams[stream_index]->codecpar) < 0) {
         printf("Failed to copy codec parameters to decoder context\n");
         return STATUS_CODE_CANT_COPY_CODEC;
     }
@@ -520,14 +520,16 @@ int stream_component_open(VideoState *is, int stream_index) {
         return -1;
     }*/
     
-    if(codecCtx->codec_type == AVMEDIA_TYPE_AUDIO) {
+    if(pCodecCtx->codec_type == AVMEDIA_TYPE_AUDIO) {
         // We want:
         // * Stereo output (= 2 channels)
         uint64_t out_channel_layout = AV_CH_LAYOUT_STEREO;
         int out_channels=av_get_channel_layout_nb_channels(out_channel_layout);
+        // * Sample rate: 44100
+        int out_sample_rate=44100;
         // * Samples: AAC-1024 MP3-1152
-        int out_nb_samples=codecCtx->frame_size;
-        wanted_spec.freq = 44100;
+        int out_nb_samples=pCodecCtx->frame_size;
+        wanted_spec.freq = out_sample_rate;
         wanted_spec.format = AUDIO_S16SYS;
         wanted_spec.channels = out_channels;
         wanted_spec.silence = 0;
@@ -539,17 +541,29 @@ int stream_component_open(VideoState *is, int stream_index) {
             printf("[stream_component_open] Can't open SDL Audio: %s.\n", SDL_GetError());
             return STATUS_CODE_SDL_CANT_OPEN_AUDIO;
         }
+        
+        // Prepare resampling context
+        enum AVSampleFormat out_sample_fmt;
+        out_sample_fmt=AV_SAMPLE_FMT_S16;
+        int64_t in_channel_layout = av_get_default_channel_layout(pCodecCtx->channels);
+        au_convert_ctx = swr_alloc();
+        au_convert_ctx = swr_alloc_set_opts(au_convert_ctx,
+                                            out_channel_layout, out_sample_fmt,        out_sample_rate,
+                                            in_channel_layout,  pCodecCtx->sample_fmt, pCodecCtx->sample_rate,
+                                            0, NULL);
+        swr_init(au_convert_ctx);
+        
     }
-    if (avcodec_open2(codecCtx, codec, NULL) < 0) {
+    if (avcodec_open2(pCodecCtx, codec, NULL) < 0) {
         printf("[stream_component_open] Can't open codec.\n");
         return STATUS_CODE_CANT_OPEN_CODEC;
     }
     
-    switch(codecCtx->codec_type) {
+    switch(pCodecCtx->codec_type) {
         case AVMEDIA_TYPE_AUDIO:
             is->audioStream = stream_index;
             is->audio_st = pFormatCtx->streams[stream_index];
-            is->audio_ctx = codecCtx;
+            is->audio_ctx = pCodecCtx;
             is->audio_buf_size = 0;
             is->audio_buf_index = 0;
             memset(&is->audio_pkt, 0, sizeof(is->audio_pkt));
@@ -558,14 +572,14 @@ int stream_component_open(VideoState *is, int stream_index) {
             break;
         case AVMEDIA_TYPE_VIDEO:
             
-            if (codecCtx->width == 0 || codecCtx->height == 0) {
+            if (pCodecCtx->width == 0 || pCodecCtx->height == 0) {
                 printf("[stream_component_open] Can't find codec information: width and height\n");
                 return STATUS_CODE_MISSING_VIDEO_CODEC_INFO;
             }
             
             is->videoStream = stream_index;
             is->video_st = pFormatCtx->streams[stream_index];
-            is->video_ctx = codecCtx;
+            is->video_ctx = pCodecCtx;
             packet_queue_init(&is->videoq);
             is->video_tid = SDL_CreateThread(video_thread, "video_thread", is);
             is->sws_ctx = sws_getContext(is->video_ctx->width, is->video_ctx->height,
@@ -602,8 +616,8 @@ int decode_thread(void *arg) {
     
     VideoState *is = (VideoState *)arg;
     AVFormatContext *pFormatCtx = NULL;
-    AVCodecContext *pCodecCtx = NULL;
-    AVCodec *pCodec = NULL;
+    //AVCodecContext *pCodecCtx = NULL;
+    //AVCodec *pCodec = NULL;
     AVPacket pkt1;
     AVPacket *packet = &pkt1;
     
@@ -688,7 +702,7 @@ int decode_thread(void *arg) {
         isInitialized = 1;
         
         // Get a pointer to the codec context for the audio stream
-        pCodecCtx=pFormatCtx->streams[audio_index]->codec;
+        /*pCodecCtx=pFormatCtx->streams[audio_index]->codec;
         
         // Find the decoder for the audio stream
         pCodec=avcodec_find_decoder(pCodecCtx->codec_id);
@@ -701,11 +715,11 @@ int decode_thread(void *arg) {
         if(avcodec_open2(pCodecCtx, pCodec,NULL)<0){
             printf("Could not open codec.\n");
             return -1;
-        }
+        }*/
         
-        AVFrame			*pFrame;
-        uint8_t			*out_buffer;
-        int64_t in_channel_layout;
+        //AVFrame			*pFrame;
+        //uint8_t			*out_buffer;
+        /*int64_t in_channel_layout;
         
         //Out Audio Param
         uint64_t out_channel_layout=AV_CH_LAYOUT_STEREO;
@@ -733,7 +747,7 @@ int decode_thread(void *arg) {
                                           out_channel_layout, out_sample_fmt,        out_sample_rate,
                                           in_channel_layout,  pCodecCtx->sample_fmt, pCodecCtx->sample_rate,
                                           0, NULL);
-        swr_init(au_convert_ctx);
+        swr_init(au_convert_ctx);*/
         avformat_flush(is->pFormatCtx);
         
         packet=(AVPacket *)av_malloc(sizeof(AVPacket));
