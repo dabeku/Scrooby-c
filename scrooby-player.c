@@ -187,6 +187,25 @@ static int packet_queue_get(PacketQueue *q, AVPacket *pkt, int block) {
     return ret;
 }
 
+static int encode(AVCodecContext *avctx, AVFrame *frame, AVPacket *pkt) {
+    int ret;
+    
+    // Send the frame to the encoder
+    ret = avcodec_send_frame(avctx, frame);
+    if (ret < 0) {
+        printf("[encode] Error sending a frame for encoding.\n");
+        return ret;
+    }
+    
+    ret = avcodec_receive_packet(avctx, pkt);
+    if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF) {
+        printf("[encode] Error during encoding.\n");
+        return ret;
+    }
+    
+    return 0;
+}
+
 static int decode(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
     int ret;
     
@@ -401,12 +420,16 @@ int frame_to_jpeg(VideoState *is, AVFrame *frame, int frameNo) {
     
     AVPacket packet = {.data = NULL, .size = 0};
     av_init_packet(&packet);
-    int gotFrame;
+    //int gotFrame;
     av_dump_format(is->pFormatCtx, 0, "", 0);
     
-    if (avcodec_encode_video2(jpegContext, &packet, frame, &gotFrame) < 0) {
+    if (encode(jpegContext, frame, &packet) < 0) {
         return -1;
     }
+    
+/*    if (avcodec_encode_video2(jpegContext, &packet, frame, &gotFrame) < 0) {
+        return -1;
+    }*/
     
     sprintf(JPEGFName, "dvr-%06d.jpg", frameNo);
     
@@ -579,7 +602,6 @@ int decode_thread(void *arg) {
     
     VideoState *is = (VideoState *)arg;
     AVFormatContext *pFormatCtx = NULL;
-    //AVCodecContext *pCodecCtxOrig = NULL;
     AVCodecContext *pCodecCtx = NULL;
     AVCodec *pCodec = NULL;
     AVPacket pkt1;
@@ -598,7 +620,7 @@ int decode_thread(void *arg) {
         
         AVInputFormat *inputFormat = av_find_input_format("mpegts");
         
-        int result = avformat_open_input(&pFormatCtx, is->url, inputFormat, NULL);
+        result = avformat_open_input(&pFormatCtx, is->url, inputFormat, NULL);
         if (result != 0) {
             printf("[decode_thread] Error: Can't open input.\n");
             return -1;
