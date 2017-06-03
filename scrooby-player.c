@@ -37,7 +37,6 @@
 #define AVCODEC_MAX_AUDIO_FRAME_SIZE 192000
 #define MAX_AUDIO_FRAME_SIZE 192000
 
-
 typedef struct PacketQueue {
     AVPacketList *first_pkt, *last_pkt;
     int nb_packets;
@@ -47,9 +46,7 @@ typedef struct PacketQueue {
 } PacketQueue;
 
 typedef struct VideoPicture {
-    //SDL_Overlay *bmp;
-    
-    int width, height; /* source height & width */
+    int width, height;
     int allocated;
 } VideoPicture;
 
@@ -120,16 +117,7 @@ void packet_queue_init(PacketQueue *q) {
 int packet_queue_put(PacketQueue *q, AVPacket *pkt) {
     
     AVPacketList *pkt1;
-    
-    /*AVPacket *pkt_copy = NULL;
-    int ret = av_packet_ref(&pkt_copy, pkt);
-    if (ret < 0) {
-        return -1;
-    }*/
-    
-    /*if(av_dup_packet(pkt) < 0) {
-        return -1;
-    }*/
+
     pkt1 = av_malloc(sizeof(AVPacketList));
     if (!pkt1)
         return -1;
@@ -260,8 +248,6 @@ void audio_callback(void *userdata, Uint8 *stream, int len) {
     AVFrame *pFrame = &is->audio_frame;
     
     ret = decode_audio( is->audio_ctx, &is->audio_frame, &got_frame, packet);
-    //ret = decode(is->audio_ctx, &is->audio_frame, &got_frame, packet);
-    //ret = avcodec_decode_audio4( is->audio_ctx, &is->audio_frame, &got_frame, packet);
 
     if (ret < 0) {
         printf("Error in decoding audio frame.\n");
@@ -272,7 +258,6 @@ void audio_callback(void *userdata, Uint8 *stream, int len) {
     uint8_t *audio_buf = is->audio_buf;
     printf("PTS (audio): %lld\n", pFrame->pts);
     ret = swr_convert(au_convert_ctx, &audio_buf,MAX_AUDIO_FRAME_SIZE, (const uint8_t **)pFrame->data, pFrame->nb_samples);
-    //printf("index:%5d\t pts:%d / %d\n",packet->pts,packet->size, ret);
 
     SDL_MixAudio(stream, (uint8_t *)is->audio_buf, len, SDL_MIX_MAXVOLUME);
     av_packet_unref(packet);
@@ -324,14 +309,12 @@ Uint32 sdl_refresh_timer_cb(Uint32 interval, void *opaque) {
     event.type = FF_REFRESH_EVENT;
     event.user.data1 = opaque;
     SDL_PushEvent(&event);
-    return 0; /* 0 means stop timer */
+    return 0; // 0 means stop timer
 }
 
 void schedule_refresh(VideoState *is, int delay) {
     SDL_AddTimer(delay, sdl_refresh_timer_cb, is);
 }
-
-
 
 int queue_picture(VideoState *is, AVFrame *pFrame) {
     
@@ -448,7 +431,6 @@ int video_thread(void *arg) {
     //printf("[video_thread]\n");
     VideoState *is = (VideoState *)arg;
     AVFrame *pFrame = NULL;
-    // TODO: Try with = NULL instead of creating a dummy object
     AVPacket pkt1;
     AVPacket *packet = &pkt1;
     int frameFinished = 0;
@@ -701,67 +683,13 @@ int decode_thread(void *arg) {
         // We have all we need
         isInitialized = 1;
         
-        // Get a pointer to the codec context for the audio stream
-        /*pCodecCtx=pFormatCtx->streams[audio_index]->codec;
-        
-        // Find the decoder for the audio stream
-        pCodec=avcodec_find_decoder(pCodecCtx->codec_id);
-        if(pCodec==NULL){
-            printf("Codec not found.\n");
-            return -1;
-        }
-        
-        // Open codec
-        if(avcodec_open2(pCodecCtx, pCodec,NULL)<0){
-            printf("Could not open codec.\n");
-            return -1;
-        }*/
-        
-        //AVFrame			*pFrame;
-        //uint8_t			*out_buffer;
-        /*int64_t in_channel_layout;
-        
-        //Out Audio Param
-        uint64_t out_channel_layout=AV_CH_LAYOUT_STEREO;
-        //nb_samples: AAC-1024 MP3-1152
-        int out_nb_samples=pCodecCtx->frame_size;
-        enum AVSampleFormat out_sample_fmt;
-        out_sample_fmt=AV_SAMPLE_FMT_S16;
-        int out_sample_rate=44100;
-        int out_channels=av_get_channel_layout_nb_channels(out_channel_layout);
-        
-        out_buffer=(uint8_t *)av_malloc(MAX_AUDIO_FRAME_SIZE*2);
-        pFrame=av_frame_alloc();
-        //SDL------------------
-        
-        
-        printf("Sample rate: %d / %d\n", pCodecCtx->sample_rate, out_sample_rate);
-        printf("Channels: %d / %d\n", pCodecCtx->channels, out_channels);
-        printf("Samples: %d\n", out_nb_samples);
-
-        // FIX: Some Codec's Context Information is missing
-        in_channel_layout=av_get_default_channel_layout(pCodecCtx->channels);
-
-        au_convert_ctx = swr_alloc();
-        au_convert_ctx = swr_alloc_set_opts(au_convert_ctx,
-                                          out_channel_layout, out_sample_fmt,        out_sample_rate,
-                                          in_channel_layout,  pCodecCtx->sample_fmt, pCodecCtx->sample_rate,
-                                          0, NULL);
-        swr_init(au_convert_ctx);*/
         avformat_flush(is->pFormatCtx);
         
-        packet=(AVPacket *)av_malloc(sizeof(AVPacket));
+        packet = (AVPacket*)av_malloc(sizeof(AVPacket));
         
         avformat_flush(is->pFormatCtx);
         
-        int c = 0;
-        
-        /*
-         * stream_component_open() end
-         */
         while(true) {
-            //printf("Audio...1\n");
-            //printf("Do something\n");
             if(is->quit) {
                 break;
             }
@@ -772,7 +700,7 @@ int decode_thread(void *arg) {
             }
             if(av_read_frame(is->pFormatCtx, packet) < 0) {
                 if(is->pFormatCtx->pb->error == 0) {
-                    SDL_Delay(100); /* no error; wait for user input */
+                    SDL_Delay(100);
                     continue;
                 } else {
                     break;
@@ -782,14 +710,12 @@ int decode_thread(void *arg) {
             if(packet->stream_index == is->videoStream) {
                 packet_queue_put(&is->videoq, packet);
             } else if(packet->stream_index == audio_index) {
-                //printf("Audio...: %d - %d\n", c, is->audioq.nb_packets);
                 packet_queue_put(&is->audioq, packet);
-                c++;
             } else {
                 av_packet_unref(packet);
             }
         }
-        /* all done - wait for it */
+        // Wait for quit status
         while(!is->quit) {
             SDL_Delay(100);
         }
@@ -816,7 +742,6 @@ void video_display(VideoState *is) {
         
         SDL_UnlockMutex(screen_mutex);
     }
-    
 }
 
 // Called by timer: Update video frame
@@ -849,13 +774,14 @@ void video_refresh_timer(void *userdata) {
     }
 }
 
-int main(int argc, char* argv[]) {
+int initialize(char *url) {
     
-    SDL_Event       event;
-    VideoState      *is;
+    SDL_Event event;
+    VideoState *is;
     
     is = av_mallocz(sizeof(VideoState));
     
+    // Disable ffmpeg log
     av_log_set_level(AV_LOG_QUIET);
     
     // Register all formats and codecs
@@ -871,11 +797,10 @@ int main(int argc, char* argv[]) {
     // Show background
     SDL_RenderClear(renderer);
     SDL_RenderPresent(renderer);
-
+    
     printf("[main] Success: SDL initialized.\n");
     screen_mutex = SDL_CreateMutex();
     
-    char *url = "udp://127.0.0.1:1234?overrun_nonfatal=1";
     av_strlcpy(is->url, url, sizeof(is->url));
     
     printf("[main] Creating mutex.\n");
@@ -902,7 +827,6 @@ int main(int argc, char* argv[]) {
                 return 0;
                 break;
             case FF_REFRESH_EVENT:
-                //printf("[main] FF_REFRESH_EVENT.\n");
                 video_refresh_timer(event.user.data1);
                 break;
             default:
@@ -910,5 +834,9 @@ int main(int argc, char* argv[]) {
         }
     }
     
-	return 0;
+    return 0;
+}
+
+int main(int argc, char* argv[]) {
+    return initialize("udp://127.0.0.1:1234?overrun_nonfatal=1");
 }
