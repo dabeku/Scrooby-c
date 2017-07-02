@@ -54,7 +54,7 @@ int camAudioStreamIndex = -1;
 struct SwrContext *swr_ctx = NULL;
 // TODO: Decide what to do with this
 uint8_t **src_data = NULL;
-int src_nb_samples = 512, dst_nb_samples;
+int src_nb_samples = 512;
 float t;
 AVFrame *final_frame = NULL;
 
@@ -104,6 +104,14 @@ static int decode_video(AVCodecContext *avctx, AVFrame *frame, AVPacket *pkt, in
 
 static int decode_audio(AVCodecContext *avctx, AVFrame *frame, AVPacket *pkt, int *got_frame) {
     return decode(avctx, frame, pkt, got_frame);
+}
+
+static int encode_video(AVCodecContext *avctx, AVFrame *frame, AVPacket *pkt, int *got_frame) {
+    return encode(avctx, frame, pkt, got_frame);
+}
+
+static int encode_audio(AVCodecContext *avctx, AVFrame *frame, AVPacket *pkt, int *got_frame) {
+    return encode(avctx, frame, pkt, got_frame);
 }
 
 static int write_frame(AVFormatContext *fmt_ctx, const AVRational *time_base, AVStream *st, AVPacket *pkt)
@@ -342,7 +350,7 @@ static AVFrame *get_audio_frame(OutputStream *ost)
                 //printf("Stream (mic): Sample rate: %d, Channel layout: %d, Channels: %d, Samples: %d\n", decoded_frame->sample_rate, decoded_frame->channel_layout, decoded_frame->channels, decoded_frame->nb_samples);
                 src_data = decoded_frame->data;
                 
-                dst_nb_samples = 1152;
+                //dst_nb_samples = 1152;
                 float tincr = 1.0 / src_rate;
                 t += (tincr * src_nb_samples);
                 
@@ -392,7 +400,7 @@ static int write_audio_frame(AVFormatContext *oc, OutputStream *ost)
     AVFrame *frame;
     int ret;
     int got_packet;
-    int dst_nb_samples;
+    //int dst_nb_samples;
 
     av_init_packet(&pkt);
     c = ost->enc;
@@ -536,31 +544,15 @@ static void open_video(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, A
 static AVFrame *get_video_frame(OutputStream *ost) {
     
     AVCodecContext *c = ost->enc;
-
-    /* when we pass a frame to the encoder, it may keep a reference to it
-     * internally; make sure we do not overwrite it here */
-//    if (av_frame_make_writable(ost->frame) < 0) {
-//        printf("WHAAAAT\n");
-//        exit(1);
-//    }
     
-    //char buf[8000];
     int ret = av_read_frame(pCamFormatCtx, &camPacket);
     if (camPacket.stream_index == camVideoStreamIndex) {
         int camFrameFinished;
-        int size = avcodec_decode_video2 (pCamCodecCtx, pCamFrame, &camFrameFinished, &camPacket);
-        av_free_packet(&camPacket);
+        ret = decode_video(pCamCodecCtx, pCamFrame, &camPacket, &camFrameFinished);
+        av_packet_unref(&camPacket);
+        
         if (camFrameFinished) {
-
-//            uint8_t *picbuf;
-//            int picbuf_size;
-//            picbuf_size = avpicture_get_size(c->pix_fmt, c->width, c->height);
-//            picbuf = (uint8_t*)av_malloc(picbuf_size);
-//            // convert picture to dest format
-//            AVFrame *newpicture = av_frame_alloc();
-//            avpicture_fill((AVPicture*)newpicture, picbuf, c->pix_fmt, c->width, c->height);
             sws_scale(pCamSwsContext, pCamFrame->data, pCamFrame->linesize, 0, pCamCodecCtx->height, newpicture->data, newpicture->linesize);
-            
                         newpicture->height =c->height;
                         newpicture->width =c->width;
                         newpicture->format = c->pix_fmt;
