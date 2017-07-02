@@ -448,7 +448,7 @@ int stream_component_open(VideoState *is, int stream_index) {
     
     pCodecCtx = avcodec_alloc_context3(codec);
     if (avcodec_parameters_to_context(pCodecCtx, pFormatCtx->streams[stream_index]->codecpar) < 0) {
-        printf("Failed to copy codec parameters to decoder context\n");
+        printf("Failed to copy codec parameters to decoder context.\n");
         return STATUS_CODE_CANT_COPY_CODEC;
     }
     /*if(avcodec_copy_context(codecCtx, pFormatCtx->streams[stream_index]->codec) != 0) {

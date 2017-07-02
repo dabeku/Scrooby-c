@@ -13,6 +13,7 @@
 #include <libavutil/mathematics.h>
 #include <libavutil/timestamp.h>
 #include <libavformat/avformat.h>
+#include <libavdevice/avdevice.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 
@@ -552,19 +553,17 @@ static AVFrame *get_video_frame(OutputStream *ost) {
         av_packet_unref(&camPacket);
         
         if (camFrameFinished) {
-            sws_scale(pCamSwsContext, pCamFrame->data, pCamFrame->linesize, 0, pCamCodecCtx->height, newpicture->data, newpicture->linesize);
+            sws_scale(pCamSwsContext, (uint8_t const * const *) pCamFrame->data, pCamFrame->linesize, 0, pCamCodecCtx->height, newpicture->data, newpicture->linesize);
                         newpicture->height =c->height;
                         newpicture->width =c->width;
                         newpicture->format = c->pix_fmt;
-            
-            int pts = 0;
             
             ost->frame = newpicture;
             ost->next_pts = ost->next_pts + 3000; // For 30 fps
             //ost->next_pts = (1.0 / 30) * 90000
             ost->frame->pts = ost->next_pts;
             
-            printf("Pts (video): %d\n", ost->frame->pts);
+            printf("Pts (video): %lld\n", ost->frame->pts);
             
             return ost->frame;
         }
@@ -589,8 +588,8 @@ static int write_video_frame(AVFormatContext *oc, OutputStream *ost)
     frame = get_video_frame(ost);
     av_init_packet(&pkt);
 
-    /* encode the image */
-    ret = avcodec_encode_video2(c, &pkt, frame, &got_packet);
+    // Encode the image
+    ret = encode_video(c, frame, &pkt, &got_packet);
     
     if (ret < 0) {
         fprintf(stderr, "Error encoding video frame: %s\n", av_err2str(ret));
@@ -599,7 +598,7 @@ static int write_video_frame(AVFormatContext *oc, OutputStream *ost)
     
     if (got_packet) {
         ret = write_frame(oc, &c->time_base, ost->st, &pkt);
-        av_free_packet(&pkt);
+        av_packet_unref(&pkt);
     } else {
         ret = 0;
     }
@@ -710,7 +709,7 @@ int main(int argc, char **argv) {
     }
     av_dump_format(pCamFormatCtx, 0, pCamName, 0);
     for(int i=0; i<pCamFormatCtx->nb_streams; i++) {
-        if(pCamFormatCtx->streams[i]->codec->coder_type == AVMEDIA_TYPE_VIDEO) {
+        if(pCamFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             camVideoStreamIndex = i;
             break;
         }
@@ -719,12 +718,19 @@ int main(int argc, char **argv) {
     if (camVideoStreamIndex == -1) {
         return -1;
     }
-    pCamCodecCtx = pCamFormatCtx->streams[camVideoStreamIndex]->codec;
-    pCamCodec = avcodec_find_decoder(pCamCodecCtx->codec_id);
+    //pCamCodecCtx = pCamFormatCtx->streams[camVideoStreamIndex]->codec;
+    pCamCodec = avcodec_find_decoder(pCamFormatCtx->streams[camVideoStreamIndex]->codecpar->codec_id);
     if (pCamCodec==NULL) {
-        printf("Codec %d not found\n", pCamCodecCtx->codec_id);
+        printf("Codec %d not found\n", pCamFormatCtx->streams[camVideoStreamIndex]->codecpar->codec_id);
         return -1;
     }
+    
+    pCamCodecCtx = avcodec_alloc_context3(pCamCodec);
+    if (avcodec_parameters_to_context(pCamCodecCtx, pCamFormatCtx->streams[camVideoStreamIndex]->codecpar) < 0) {
+        printf("Failed to copy codec parameters to decoder context.\n");
+        return STATUS_CODE_CANT_COPY_CODEC;
+    }
+    
     if (avcodec_open2(pCamCodecCtx, pCamCodec, NULL) < 0) {
         printf("Can't open camera codec\n");
         return -1;
