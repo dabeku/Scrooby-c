@@ -2,6 +2,10 @@
  * Captures camera and microphone and sends it to a destination
  */
 
+/*
+ * TODO:
+ * - Remove constants: nb_samples, 1152, 3000, 44100, etc.
+ */
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -69,7 +73,6 @@ typedef struct OutputStream {
     int samples_count;
 
     AVFrame *frame;
-    AVFrame *tmp_frame;
 
     struct SwsContext *sws_ctx;
 } OutputStream;
@@ -253,8 +256,6 @@ static int open_audio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AV
 
     ost->frame     = alloc_audio_frame(c->sample_fmt, c->channel_layout,
                                        c->sample_rate, c->frame_size);
-    ost->tmp_frame = alloc_audio_frame(AV_SAMPLE_FMT_S16, c->channel_layout,
-                                       c->sample_rate, c->frame_size);
 
     // Copy the stream parameters to the muxer
     ret = avcodec_parameters_from_context(ost->st->codecpar, c);
@@ -432,18 +433,6 @@ static int open_video(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AV
         return STATUS_CODE_NOK;
     }
 
-    /* If the output format is not YUV420P, then a temporary YUV420P
-     * picture is needed too. It is then converted to the required
-     * output format. */
-    ost->tmp_frame = NULL;
-    if (c->pix_fmt != AV_PIX_FMT_YUV420P) {
-        ost->tmp_frame = alloc_picture(AV_PIX_FMT_YUV420P, c->width, c->height);
-        if (!ost->tmp_frame) {
-            printf("[open_video] Could not allocate temporary picture.\n");
-            return STATUS_CODE_NOK;
-        }
-    }
-
     /* copy the stream parameters to the muxer */
     ret = avcodec_parameters_from_context(ost->st->codecpar, c);
     if (ret < 0) {
@@ -520,7 +509,6 @@ static int write_video_frame(AVFormatContext *oc, OutputStream *ost) {
 static void close_stream(AVFormatContext *oc, OutputStream *ost) {
     avcodec_free_context(&ost->enc);
     av_frame_free(&ost->frame);
-    av_frame_free(&ost->tmp_frame);
     sws_freeContext(ost->sws_ctx);
 }
 
