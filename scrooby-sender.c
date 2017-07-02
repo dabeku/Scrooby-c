@@ -237,7 +237,6 @@ static AVFrame *alloc_audio_frame(enum AVSampleFormat sample_fmt, uint64_t chann
 static int open_audio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg) {
     
     AVCodecContext *c;
-    int nb_samples;
     int ret;
     AVDictionary *opt = NULL;
 
@@ -252,26 +251,21 @@ static int open_audio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AV
         return STATUS_CODE_NOK;
     }
 
-    if (c->codec->capabilities & AV_CODEC_CAP_VARIABLE_FRAME_SIZE)
-        nb_samples = 10000;
-    else
-        nb_samples = c->frame_size;
-
     ost->frame     = alloc_audio_frame(c->sample_fmt, c->channel_layout,
-                                       c->sample_rate, nb_samples);
+                                       c->sample_rate, c->frame_size);
     ost->tmp_frame = alloc_audio_frame(AV_SAMPLE_FMT_S16, c->channel_layout,
-                                       c->sample_rate, nb_samples);
+                                       c->sample_rate, c->frame_size);
 
-    /* copy the stream parameters to the muxer */
+    // Copy the stream parameters to the muxer
     ret = avcodec_parameters_from_context(ost->st->codecpar, c);
     if (ret < 0) {
         printf("[open_audio] Could not copy the stream parameters.\n");
-        exit(1);
+        return STATUS_CODE_NOK;
     }
+    return STATUS_CODE_OK;
 }
 
-static AVFrame *get_audio_frame(OutputStream *ost)
-{
+static AVFrame *get_audio_frame(OutputStream *ost) {
     
     AVPacket micPacket = { 0 };
     // TODO: do not use infinite loop
@@ -290,15 +284,13 @@ static AVFrame *get_audio_frame(OutputStream *ost)
             av_packet_unref(&micPacket);
             
             if (micFrameFinished) {
-                //printf("Stream (mic): Sample rate: %d, Channel layout: %d, Channels: %d, Samples: %d\n", decoded_frame->sample_rate, decoded_frame->channel_layout, decoded_frame->channels, decoded_frame->nb_samples);
                 src_data = decoded_frame->data;
                 
-                //ret = swr_convert(swr_ctx, decoded_frame->data, dst_nb_samples, (const uint8_t **)src_data, src_nb_samples);
                 // Use swr_convert() as FIFO: Put in some data
                 int outSamples = swr_convert(swr_ctx, NULL, 0, (const uint8_t **)src_data, src_nb_samples);
                 if (outSamples < 0) {
-                    printf("No samples\n");
-                    exit(-1);
+                    printf("[get_audio_frame] No samples.\n");
+                    return NULL;
                 }
                 
                 while (1) {
@@ -310,13 +302,9 @@ static AVFrame *get_audio_frame(OutputStream *ost)
                         // We don't have enough samples yet. Continue reading frames.
                         break;
                     }
-                    //AVFrame *frame = ost->frame;
                     // We got enough samples. Convert to destination format
                     outSamples = swr_convert(swr_ctx, final_frame->data, 1152, NULL, 0);
                     final_frame->nb_samples = 1152;
-                    //printf("Out samples: %d vs. %d\n", outSamples, final_frame->nb_samples);
-//                    printf("Out samples: %d vs. %d\n", final_frame->pts, decoded_frame->pts);
-                    //final_frame->pts = decoded_frame->pts;
                     final_frame->pts = ost->next_pts;
                     ost->next_pts += final_frame->nb_samples;
                     return final_frame;
@@ -326,14 +314,7 @@ static AVFrame *get_audio_frame(OutputStream *ost)
     }
 }
 
-
-
-/*
- * encode one audio frame and send it to the muxer
- * return 1 when encoding is finished, 0 otherwise
- */
-static int write_audio_frame(AVFormatContext *oc, OutputStream *ost)
-{
+static int write_audio_frame(AVFormatContext *oc, OutputStream *ost) {
     AVCodecContext *c;
     AVPacket pkt = { 0 }; // data and size must be 0;
     AVFrame *frame;
@@ -347,7 +328,6 @@ static int write_audio_frame(AVFormatContext *oc, OutputStream *ost)
     frame = get_audio_frame(ost);
 
     ost->samples_count += 1152;
-//    
     
 //    if (frame) {
 //        /* convert samples from native format to destination codec format, using the resampler */
@@ -379,20 +359,17 @@ static int write_audio_frame(AVFormatContext *oc, OutputStream *ost)
 //    }
 
     ret = encode(c, frame, &pkt, &got_packet);
-    //ret = avcodec_encode_audio2(c, &pkt, frame, &got_packet);
     if (ret < 0) {
-        fprintf(stderr, "Error encoding audio frame: %s\n", av_err2str(ret));
-        exit(1);
+        printf("[write_audio_frame] Error encoding audio frame: %s.\n", av_err2str(ret));
+        return STATUS_CODE_NOK;
     }
 
     if (got_packet) {
         ret = write_frame(oc, &c->time_base, ost->st, &pkt);
         if (ret < 0) {
-            fprintf(stderr, "Error while writing audio frame: %s\n",
-                    av_err2str(ret));
-            exit(1);
+            printf("[write_audio_frame] Error while writing audio frame: %s.\n", av_err2str(ret));
+            return STATUS_CODE_NOK;
         }
-        
         av_packet_unref(&pkt);
     }
 
@@ -401,25 +378,22 @@ static int write_audio_frame(AVFormatContext *oc, OutputStream *ost)
 
 int write_audio(void *arg) {
     Container *container = (Container *)arg;
-    
     while(1) {
         write_audio_frame(container->formatContext, container->outputStream);
     }
-    
     return 0;
 }
 
-/**************************************************************/
-/* video output */
-
-static AVFrame *alloc_picture(enum AVPixelFormat pix_fmt, int width, int height)
-{
+static AVFrame *alloc_picture(enum AVPixelFormat pix_fmt, int width, int height) {
+    
     AVFrame *picture;
     int ret;
 
     picture = av_frame_alloc();
-    if (!picture)
+    if (!picture) {
+        printf("[alloc_picture] Could not allocate frame data.\n");
         return NULL;
+    }
 
     picture->format = pix_fmt;
     picture->width  = width;
@@ -428,15 +402,15 @@ static AVFrame *alloc_picture(enum AVPixelFormat pix_fmt, int width, int height)
     /* allocate the buffers for the frame data */
     ret = av_frame_get_buffer(picture, 32);
     if (ret < 0) {
-        fprintf(stderr, "Could not allocate frame data.\n");
-        exit(1);
+        printf("[alloc_picture] Could not get frame buffer.\n");
+        return NULL;
     }
 
     return picture;
 }
 
-static void open_video(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg)
-{
+static int open_video(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg) {
+    
     int ret;
     AVCodecContext *c = ost->enc;
     AVDictionary *opt = NULL;
@@ -447,15 +421,15 @@ static void open_video(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, A
     ret = avcodec_open2(c, codec, &opt);
     av_dict_free(&opt);
     if (ret < 0) {
-        fprintf(stderr, "Could not open video codec: %s\n", av_err2str(ret));
-        exit(1);
+        printf("[open_video] Could not open video codec: %s.\n", av_err2str(ret));
+        return STATUS_CODE_NOK;
     }
 
     /* allocate and init a re-usable frame */
     ost->frame = alloc_picture(c->pix_fmt, c->width, c->height);
     if (!ost->frame) {
-        fprintf(stderr, "Could not allocate video frame\n");
-        exit(1);
+        printf("[open_video] Could not allocate video frame.\n");
+        return STATUS_CODE_NOK;
     }
 
     /* If the output format is not YUV420P, then a temporary YUV420P
@@ -465,17 +439,18 @@ static void open_video(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, A
     if (c->pix_fmt != AV_PIX_FMT_YUV420P) {
         ost->tmp_frame = alloc_picture(AV_PIX_FMT_YUV420P, c->width, c->height);
         if (!ost->tmp_frame) {
-            fprintf(stderr, "Could not allocate temporary picture\n");
-            exit(1);
+            printf("[open_video] Could not allocate temporary picture.\n");
+            return STATUS_CODE_NOK;
         }
     }
 
     /* copy the stream parameters to the muxer */
     ret = avcodec_parameters_from_context(ost->st->codecpar, c);
     if (ret < 0) {
-        fprintf(stderr, "Could not copy the stream parameters\n");
-        exit(1);
+        printf("[open_video] Could not copy the stream parameters.\n");
+        return STATUS_CODE_NOK;
     }
+    return STATUS_CODE_OK;
 }
 
 static AVFrame *get_video_frame(OutputStream *ost) {
@@ -495,6 +470,7 @@ static AVFrame *get_video_frame(OutputStream *ost) {
                         newpicture->format = c->pix_fmt;
             
             ost->frame = newpicture;
+            // TODO: Make this variable
             ost->next_pts = ost->next_pts + 3000; // For 30 fps
             //ost->next_pts = (1.0 / 30) * 90000
             ost->frame->pts = ost->next_pts;
@@ -506,12 +482,8 @@ static AVFrame *get_video_frame(OutputStream *ost) {
     return ost->frame;
 }
 
-/*
- * encode one video frame and send it to the muxer
- * return 1 when encoding is finished, 0 otherwise
- */
-static int write_video_frame(AVFormatContext *oc, OutputStream *ost)
-{
+static int write_video_frame(AVFormatContext *oc, OutputStream *ost) {
+    
     int ret;
     AVCodecContext *c;
     AVFrame *frame = NULL;
@@ -526,8 +498,8 @@ static int write_video_frame(AVFormatContext *oc, OutputStream *ost)
     ret = encode_video(c, frame, &pkt, &got_packet);
     
     if (ret < 0) {
-        fprintf(stderr, "Error encoding video frame: %s\n", av_err2str(ret));
-        exit(1);
+        printf("[write_video_frame] Error encoding video frame: %s.\n", av_err2str(ret));
+        return STATUS_CODE_NOK;
     }
     
     if (got_packet) {
@@ -538,8 +510,8 @@ static int write_video_frame(AVFormatContext *oc, OutputStream *ost)
     }
 
     if (ret < 0) {
-        fprintf(stderr, "Error while writing video frame: %s\n", av_err2str(ret));
-        exit(1);
+        printf("[write_video_frame] Error while writing video frame: %s.\n", av_err2str(ret));
+        return STATUS_CODE_NOK;
     }
 
     return (frame || got_packet) ? 0 : 1;
