@@ -809,12 +809,13 @@ int main(int argc, char **argv) {
         // TODO: Handle all exist() calls
         exit(-1);
     }
-
     
-    /* set options */
-    av_opt_set_int(swr_ctx, "in_channel_layout",    src_ch_layout, 0);
-    av_opt_set_int(swr_ctx, "in_sample_rate",       src_rate, 0);
-    av_opt_set_sample_fmt(swr_ctx, "in_sample_fmt", src_sample_fmt, 0);
+    // Channel layout: 3 = STEREO (LEFT | RIGHT)
+    // Sample rate: 44100
+    // Sample format: 3 = AV_SAMPLE_FMT_FLT
+    av_opt_set_int(swr_ctx, "in_channel_layout",    pMicCodecCtx->channel_layout, 0);
+    av_opt_set_int(swr_ctx, "in_sample_rate",       pMicCodecCtx->sample_rate, 0);
+    av_opt_set_sample_fmt(swr_ctx, "in_sample_fmt", pMicCodecCtx->sample_fmt, 0);
     
     av_opt_set_int(swr_ctx, "out_channel_layout",    dst_ch_layout, 0);
     av_opt_set_int(swr_ctx, "out_sample_rate",       dst_rate, 0);
