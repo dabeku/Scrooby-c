@@ -98,12 +98,12 @@ static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt) {
            pkt->stream_index);
 }
 
-static int decode_video(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
-    return decode(avctx, frame, got_frame, pkt);
+static int decode_video(AVCodecContext *avctx, AVFrame *frame, AVPacket *pkt, int *got_frame) {
+    return decode(avctx, frame, pkt, got_frame);
 }
 
-static int decode_audio(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
-    return decode(avctx, frame, got_frame, pkt);
+static int decode_audio(AVCodecContext *avctx, AVFrame *frame, AVPacket *pkt, int *got_frame) {
+    return decode(avctx, frame, pkt, got_frame);
 }
 
 static int write_frame(AVFormatContext *fmt_ctx, const AVRational *time_base, AVStream *st, AVPacket *pkt)
@@ -329,19 +329,15 @@ static AVFrame *get_audio_frame(OutputStream *ost)
         if (micPacket.stream_index == camAudioStreamIndex) {
             int micFrameFinished = 0;
             
-            ret = decode_audio(pMicCodecCtx, decoded_frame, &micFrameFinished, &micPacket);
+            ret = decode_audio(pMicCodecCtx, decoded_frame, &micPacket, &micFrameFinished);
             if (ret < 0) {
                 printf("Error in decoding audio frame.\n");
                 av_packet_unref(&micPacket);
                 continue;
             }
             
-            //int size = avcodec_decode_audio4 (pMicCodecCtx, decoded_frame, &micFrameFinished, &micPacket);
+            av_packet_unref(&micPacket);
             
-            //av_frame_free(&decoded_frame);
-            av_free_packet(&micPacket);
-            
-            int sampleCount = 0;
             if (micFrameFinished) {
                 //printf("Stream (mic): Sample rate: %d, Channel layout: %d, Channels: %d, Samples: %d\n", decoded_frame->sample_rate, decoded_frame->channel_layout, decoded_frame->channels, decoded_frame->nb_samples);
                 src_data = decoded_frame->data;
@@ -435,7 +431,8 @@ static int write_audio_frame(AVFormatContext *oc, OutputStream *ost)
 //        ost->samples_count += dst_nb_samples;
 //    }
 
-    ret = avcodec_encode_audio2(c, &pkt, frame, &got_packet);
+    ret = encode(c, frame, &pkt, &got_packet);
+    //ret = avcodec_encode_audio2(c, &pkt, frame, &got_packet);
     if (ret < 0) {
         fprintf(stderr, "Error encoding audio frame: %s\n", av_err2str(ret));
         exit(1);
@@ -449,7 +446,7 @@ static int write_audio_frame(AVFormatContext *oc, OutputStream *ost)
             exit(1);
         }
         
-        av_free_packet(&pkt);
+        av_packet_unref(&pkt);
     }
 
     return (frame || got_packet) ? 0 : 1;

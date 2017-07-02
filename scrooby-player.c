@@ -176,12 +176,12 @@ static int packet_queue_get(PacketQueue *q, AVPacket *pkt, int block) {
     return ret;
 }
 
-static int decode_video(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
-    return decode(avctx, frame, got_frame, pkt);
+static int decode_video(AVCodecContext *avctx, AVFrame *frame, AVPacket *pkt, int *got_frame) {
+    return decode(avctx, frame, pkt, got_frame);
 }
 
-static int decode_audio(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
-    return decode(avctx, frame, got_frame, pkt);
+static int decode_audio(AVCodecContext *avctx, AVFrame *frame, AVPacket *pkt, int *got_frame) {
+    return decode(avctx, frame, pkt, got_frame);
 }
 
 void audio_callback(void *userdata, Uint8 *stream, int len) {
@@ -205,7 +205,7 @@ void audio_callback(void *userdata, Uint8 *stream, int len) {
     
     AVFrame *pFrame = &is->audio_frame;
     
-    ret = decode_audio( is->audio_ctx, &is->audio_frame, &got_frame, packet);
+    ret = decode_audio( is->audio_ctx, &is->audio_frame, packet, &got_frame);
 
     if (ret < 0) {
         printf("Error in decoding audio frame.\n");
@@ -363,14 +363,11 @@ int frame_to_jpeg(VideoState *is, AVFrame *frame, int frameNo) {
     av_init_packet(&packet);
     //int gotFrame;
     av_dump_format(is->pFormatCtx, 0, "", 0);
+    int got_frame = 0;
     
-    if (encode(jpegContext, frame, &packet) < 0) {
+    if (encode(jpegContext, frame, &packet, &got_frame) < 0) {
         return -1;
     }
-    
-/*    if (avcodec_encode_video2(jpegContext, &packet, frame, &gotFrame) < 0) {
-        return -1;
-    }*/
     
     sprintf(JPEGFName, "dvr-%06d.jpg", frameNo);
     
@@ -404,8 +401,7 @@ int video_thread(void *arg) {
             // Means we quit getting packets
             break;
         }
-        int ret = decode_video(is->video_ctx, pFrame, &frameFinished, packet);
-        //int ret = decode_audio(is->video_ctx, pFrame, packet);
+        int ret = decode_video(is->video_ctx, pFrame, packet, &frameFinished);
         if ( ret < 0 ) {
             printf("Error in decoding video frame.\n");
             av_packet_unref(packet);
