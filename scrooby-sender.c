@@ -12,6 +12,7 @@
 #include <libavutil/opt.h>
 #include <libavutil/mathematics.h>
 #include <libavutil/timestamp.h>
+#include <libavutil/imgutils.h>
 #include <libavformat/avformat.h>
 #include <libavdevice/avdevice.h>
 #include <libswscale/swscale.h>
@@ -748,12 +749,17 @@ int main(int argc, char **argv) {
     }
     
     uint8_t *picbuf;
-    int picbuf_size;
-    picbuf_size = avpicture_get_size(video_st.enc->pix_fmt, video_st.enc->width, video_st.enc->height);
+    
+    int picbuf_size = av_image_get_buffer_size(
+                                            video_st.enc->pix_fmt,
+                                            video_st.enc->width,
+                                            video_st.enc->height, 16);
+    
     picbuf = (uint8_t*)av_malloc(picbuf_size);
     // convert picture to dest format
     newpicture = av_frame_alloc();
-    avpicture_fill((AVPicture*)newpicture, picbuf, video_st.enc->pix_fmt, video_st.enc->width, video_st.enc->height);
+    
+    av_image_fill_arrays (newpicture->data, newpicture->linesize, picbuf, video_st.enc->pix_fmt, video_st.enc->width, video_st.enc->height, 1);
     
     /*
      * Audio
