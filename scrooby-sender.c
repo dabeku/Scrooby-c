@@ -20,6 +20,7 @@
 #include <SDL2/SDL_thread.h>
 
 #include "scr-statuscode.h"
+#include "scr-utility.h"
 
 #define STREAM_FRAME_RATE 25 /* 25 images/s */
 #define STREAM_PIX_FMT    AV_PIX_FMT_YUV420P /* default pix_fmt */
@@ -29,11 +30,11 @@
 SDL_mutex *write_mutex = NULL;
 SDL_Thread *audio_thread = NULL;
 
-const char *pCamName = "FaceTime HD Camera";
+const char *pCamName = "FaceTime HD Camera";
 AVFormatContext *pCamFormatCtx = NULL;
 AVInputFormat *pCamInputFormat = NULL;
 AVDictionary *pCamOpt = NULL;
-AVCodecContext *pCamCodecCtx = NULL;
+AVCodecContext *pCamCodecCtx = NULL;
 AVCodec *pCamCodec = NULL;
 AVPacket camPacket;
 AVFrame *pCamFrame = NULL;
@@ -41,11 +42,11 @@ int camVideoStreamIndex = -1;
 struct SwsContext *pCamSwsContext = NULL;
 AVFrame *newpicture = NULL;
 
-const char *pMicName = ":Built-in Microphone";
+const char *pMicName = ":Built-in Microphone";
 AVFormatContext *pMicFormatCtx = NULL;
 AVInputFormat *pMicInputFormat = NULL;
 AVDictionary *pMicOpt = NULL;
-AVCodecContext *pMicCodecCtx = NULL;
+AVCodecContext *pMicCodecCtx = NULL;
 AVCodec *pMicCodec = NULL;
 //AVPacket micPacket;
 AVFrame *decoded_frame = NULL;
@@ -88,15 +89,21 @@ typedef struct Container {
     AVFormatContext *formatContext;
 } Container;
 
-static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt)
-{
+static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt) {
     AVRational *time_base = &fmt_ctx->streams[pkt->stream_index]->time_base;
-
     printf("pts:%s pts_time:%s dts:%s dts_time:%s duration:%s duration_time:%s stream_index:%d\n",
            av_ts2str(pkt->pts), av_ts2timestr(pkt->pts, time_base),
            av_ts2str(pkt->dts), av_ts2timestr(pkt->dts, time_base),
            av_ts2str(pkt->duration), av_ts2timestr(pkt->duration, time_base),
            pkt->stream_index);
+}
+
+static int decode_video(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
+    return decode(avctx, frame, got_frame, pkt);
+}
+
+static int decode_audio(AVCodecContext *avctx, AVFrame *frame, int *got_frame, AVPacket *pkt) {
+    return decode(avctx, frame, got_frame, pkt);
 }
 
 static int write_frame(AVFormatContext *fmt_ctx, const AVRational *time_base, AVStream *st, AVPacket *pkt)
@@ -110,7 +117,7 @@ static int write_frame(AVFormatContext *fmt_ctx, const AVRational *time_base, AV
         // Rescale audio pts from 1152 to 2351
         av_packet_rescale_ts(pkt, *time_base, st->time_base);
     }
-    printf("PTS (stream: %d): %d\n", st->index, pkt->pts);
+    printf("PTS (stream: %d): %lld\n", st->index, pkt->pts);
 
     SDL_LockMutex(write_mutex);
     /* Write the compressed frame to the media file. */
@@ -321,7 +328,15 @@ static AVFrame *get_audio_frame(OutputStream *ost)
         int ret = av_read_frame(pMicFormatCtx, &micPacket);
         if (micPacket.stream_index == camAudioStreamIndex) {
             int micFrameFinished = 0;
-            int size = avcodec_decode_audio4 (pMicCodecCtx, decoded_frame, &micFrameFinished, &micPacket);
+            
+            ret = decode_audio(pMicCodecCtx, decoded_frame, &micFrameFinished, &micPacket);
+            if (ret < 0) {
+                printf("Error in decoding audio frame.\n");
+                av_packet_unref(&micPacket);
+                continue;
+            }
+            
+            //int size = avcodec_decode_audio4 (pMicCodecCtx, decoded_frame, &micFrameFinished, &micPacket);
             
             //av_frame_free(&decoded_frame);
             av_free_packet(&micPacket);

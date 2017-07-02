@@ -21,18 +21,22 @@ SCROOBY = 	scrooby-sender	\
 
 OBJS = 		scrooby-sender.o	\
 		scrooby-player.o	\
-		scr-network.o
+		scr-network.o		\
+		scr-utility.o		
 
-all: scrooby-sender scrooby-player
+all: scr-utility.o scr-network.o scrooby-sender scrooby-player
+
+scr-utility.o: scr-utility.c scr-utility.h
+	$(CC) $(CFLAGS) -c scr-utility.c
 
 scr-network.o: scr-network.c scr-network.h 
 	$(CC) $(CFLAGS) -c scr-network.c
 
 scrooby-sender: scrooby-sender.o
-	gcc scrooby-sender.o -o scrooby-sender $(CFLAGS) $(LDLIBS)
+	gcc scrooby-sender.o scr-utility.o -o scrooby-sender $(CFLAGS) $(LDLIBS)
 
-scrooby-player: scrooby-player.o scr-network.o
-	gcc scrooby-player.o scr-network.o -o scrooby-player $(CFLAGS) $(LDLIBS)
+scrooby-player: scrooby-player.o
+	gcc scrooby-player.o scr-utility.o scr-network.o -o scrooby-player $(CFLAGS) $(LDLIBS)
 
 clean-test:
 	$(RM) test.*
