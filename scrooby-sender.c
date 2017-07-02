@@ -91,15 +91,6 @@ typedef struct Container {
     AVFormatContext *formatContext;
 } Container;
 
-static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt) {
-    AVRational *time_base = &fmt_ctx->streams[pkt->stream_index]->time_base;
-    printf("pts:%s pts_time:%s dts:%s dts_time:%s duration:%s duration_time:%s stream_index:%d\n",
-           av_ts2str(pkt->pts), av_ts2timestr(pkt->pts, time_base),
-           av_ts2str(pkt->dts), av_ts2timestr(pkt->dts, time_base),
-           av_ts2str(pkt->duration), av_ts2timestr(pkt->duration, time_base),
-           pkt->stream_index);
-}
-
 static int decode_video(AVCodecContext *avctx, AVFrame *frame, AVPacket *pkt, int *got_frame) {
     return decode(avctx, frame, pkt, got_frame);
 }
@@ -112,12 +103,7 @@ static int encode_video(AVCodecContext *avctx, AVFrame *frame, AVPacket *pkt, in
     return encode(avctx, frame, pkt, got_frame);
 }
 
-static int encode_audio(AVCodecContext *avctx, AVFrame *frame, AVPacket *pkt, int *got_frame) {
-    return encode(avctx, frame, pkt, got_frame);
-}
-
-static int write_frame(AVFormatContext *fmt_ctx, const AVRational *time_base, AVStream *st, AVPacket *pkt)
-{
+static int write_frame(AVFormatContext *fmt_ctx, const AVRational *time_base, AVStream *st, AVPacket *pkt) {
     
     /* rescale output packet timestamp values from codec to stream timebase */
     //av_packet_rescale_ts(pkt, *time_base, st->time_base);
@@ -465,9 +451,7 @@ static int write_audio_frame(AVFormatContext *oc, OutputStream *ost)
 int write_audio(void *arg) {
     Container *container = (Container *)arg;
     
-    
     while(1) {
-        printf("... Audio\n");
         write_audio_frame(container->formatContext, container->outputStream);
     }
     
@@ -564,8 +548,6 @@ static AVFrame *get_video_frame(OutputStream *ost) {
             //ost->next_pts = (1.0 / 30) * 90000
             ost->frame->pts = ost->next_pts;
             
-            printf("Pts (video): %lld\n", ost->frame->pts);
-            
             return ost->frame;
         }
     }
@@ -635,7 +617,6 @@ int main(int argc, char **argv) {
     int have_video = 0, have_audio = 0;
     int encode_video = 0, encode_audio = 0;
     AVDictionary *opt = NULL;
-    int i;
 
     // Initialize libavcodec, and register all codecs and formats
     av_register_all();
@@ -719,7 +700,7 @@ int main(int argc, char **argv) {
     if (camVideoStreamIndex == -1) {
         return -1;
     }
-    //pCamCodecCtx = pCamFormatCtx->streams[camVideoStreamIndex]->codec;
+
     pCamCodec = avcodec_find_decoder(pCamFormatCtx->streams[camVideoStreamIndex]->codecpar->codec_id);
     if (pCamCodec==NULL) {
         printf("Codec %d not found\n", pCamFormatCtx->streams[camVideoStreamIndex]->codecpar->codec_id);
@@ -728,7 +709,7 @@ int main(int argc, char **argv) {
     
     pCamCodecCtx = avcodec_alloc_context3(pCamCodec);
     if (avcodec_parameters_to_context(pCamCodecCtx, pCamFormatCtx->streams[camVideoStreamIndex]->codecpar) < 0) {
-        printf("Failed to copy codec parameters to decoder context.\n");
+        printf("Failed to copy video codec parameters to decoder context.\n");
         return STATUS_CODE_CANT_COPY_CODEC;
     }
     
@@ -785,12 +766,19 @@ int main(int argc, char **argv) {
     if (camAudioStreamIndex == -1) {
         return -1;
     }
-    pMicCodecCtx = pMicFormatCtx->streams[camAudioStreamIndex]->codec;
-    pMicCodec = avcodec_find_decoder(pMicCodecCtx->codec_id);
+    
+    pMicCodec = avcodec_find_decoder(pMicFormatCtx->streams[camAudioStreamIndex]->codecpar->codec_id);
     if (pCamCodec==NULL) {
-        printf("Codec %d not found\n", pMicCodecCtx->codec_id);
+        printf("Codec %d not found\n", pMicFormatCtx->streams[camAudioStreamIndex]->codecpar->codec_id);
         return -1;
     }
+    
+    pMicCodecCtx = avcodec_alloc_context3(pMicCodec);
+    if (avcodec_parameters_to_context(pMicCodecCtx, pMicFormatCtx->streams[camAudioStreamIndex]->codecpar) < 0) {
+        printf("Failed to copy audio codec parameters to decoder context.\n");
+        return STATUS_CODE_CANT_COPY_CODEC;
+    }
+    
     if (avcodec_open2(pMicCodecCtx, pMicCodec, NULL) < 0) {
         printf("Can't open audio codec\n");
         return -1;
@@ -846,37 +834,7 @@ int main(int argc, char **argv) {
     audio_thread = SDL_CreateThread(write_audio, "write_audio", &container);
     
     while (encode_video || encode_audio) {
-        
-        printf("... Video\n");
         encode_video = !write_video_frame(outputContext, &video_st);
-//        printf("... Audio\n");
-//        encode_audio = !write_audio_frame(oc, &audio_st);
-        
-//        printf("Video: %d / %d --- Audio: %d / %d --- static: %d\n", video_st.next_pts, video_st.enc->time_base, audio_st.next_pts, audio_st.enc->time_base, static_pts);
-//        nextPTS();
-//        
-//        //int cp = av_compare_ts(video_st.next_pts, video_st.enc->time_base, audio_st.next_pts, audio_st.enc->time_base);
-//        int cp = av_compare_ts(static_pts, video_st.enc->time_base, audio_st.next_pts, audio_st.enc->time_base);
-//        //printf("Compare: %d. V1: %d / %d --- A1: %d / %d --- static: %d\n", cp, video_st.next_pts, video_st.enc->time_base, audio_st.next_pts, audio_st.enc->time_base, static_pts);
-//        
-//        if (encode_video && cp <= 0) {
-//            printf("... Video\n");
-//            encode_video = !write_video_frame(oc, &video_st);
-//        } else {
-//            printf("... Audio\n");
-//            encode_audio = !write_audio_frame(oc, &audio_st);
-//        }
-        
-//        /* select the stream to encode */
-//        if (encode_video &&
-//            (!encode_audio || av_compare_ts(video_st.next_pts, video_st.enc->time_base,
-//                                            audio_st.next_pts, audio_st.enc->time_base) <= 0)) {
-//            printf("... Video\n");
-//            encode_video = !write_video_frame(oc, &video_st);
-//        } else {
-//            printf("... Audio\n");
-//            encode_audio = !write_audio_frame(oc, &audio_st);
-//        }
     }
     printf("AFTER LOOP\n");
 
