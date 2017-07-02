@@ -57,16 +57,7 @@ struct SwrContext *swr_ctx = NULL;
 // TODO: Decide what to do with this
 uint8_t **src_data = NULL;
 int src_nb_samples = 512;
-float t;
 AVFrame *final_frame = NULL;
-
-// TODO: Take in_ values from codec so that it's generic
-int64_t src_ch_layout = AV_CH_LAYOUT_STEREO;
-int64_t dst_ch_layout = AV_CH_LAYOUT_STEREO;
-int src_rate = 44100;
-int dst_rate = 44100;
-enum AVSampleFormat src_sample_fmt = AV_SAMPLE_FMT_FLT;
-enum AVSampleFormat dst_sample_fmt = AV_SAMPLE_FMT_S16;
 
 // a wrapper around a single output AVStream
 typedef struct OutputStream {
@@ -80,10 +71,7 @@ typedef struct OutputStream {
     AVFrame *frame;
     AVFrame *tmp_frame;
 
-    float t, tincr, tincr2;
-
     struct SwsContext *sws_ctx;
-    struct SwrContext *swr_ctx;
 } OutputStream;
 
 typedef struct Container {
@@ -127,34 +115,33 @@ static int write_frame(AVFormatContext *fmt_ctx, const AVRational *time_base, AV
 }
 
 // Add an output stream
-static void add_stream(OutputStream *ost, AVFormatContext *oc, AVCodec **codec, enum AVCodecID codec_id) {
+static int add_stream(OutputStream *ost, AVFormatContext *oc, AVCodec **codec, enum AVCodecID codec_id) {
     AVCodecContext *c = NULL;
     int i;
 
     /* find the encoder */
     *codec = avcodec_find_encoder(codec_id);
     if (!(*codec)) {
-        fprintf(stderr, "[add_stream] Could not find encoder for '%s'\n", avcodec_get_name(codec_id));
-        exit(1);
+        printf("[add_stream] Could not find encoder for '%s'.\n", avcodec_get_name(codec_id));
+        return STATUS_CODE_NOK;
     }
 
     ost->st = avformat_new_stream(oc, NULL);
     if (!ost->st) {
-        fprintf(stderr, "Could not allocate stream\n");
-        exit(1);
+        printf("[add_stream] Could not allocate stream.\n");
+        return STATUS_CODE_NOK;
     }
     ost->st->id = oc->nb_streams-1;
     c = avcodec_alloc_context3(*codec);
     if (!c) {
-        fprintf(stderr, "Could not alloc an encoding context\n");
-        exit(1);
+        printf("[add_stream] Could not alloc an encoding context.\n");
+        return STATUS_CODE_CANT_ALLOCATE;
     }
     ost->enc = c;
 
     switch ((*codec)->type) {
     case AVMEDIA_TYPE_AUDIO:
-        c->sample_fmt  = (*codec)->sample_fmts ?
-            (*codec)->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
+        c->sample_fmt  = (*codec)->sample_fmts ? (*codec)->sample_fmts[0] : AV_SAMPLE_FMT_FLTP;
         c->bit_rate    = 64000;
         c->sample_rate = 44100;
         if ((*codec)->supported_samplerates) {
@@ -164,7 +151,7 @@ static void add_stream(OutputStream *ost, AVFormatContext *oc, AVCodec **codec, 
                     c->sample_rate = 44100;
             }
         }
-        c->channels        = av_get_channel_layout_nb_channels(c->channel_layout);
+        c->channels       = av_get_channel_layout_nb_channels(c->channel_layout);
         c->channel_layout = AV_CH_LAYOUT_STEREO;
         if ((*codec)->channel_layouts) {
             c->channel_layout = (*codec)->channel_layouts[0];
@@ -178,6 +165,7 @@ static void add_stream(OutputStream *ost, AVFormatContext *oc, AVCodec **codec, 
         break;
 
     case AVMEDIA_TYPE_VIDEO:
+        printf("[add_stream] Set codec to '%d' (28 = H264).\n", codec_id);
         c->codec_id = codec_id;
 
         c->bit_rate = 400000;
@@ -204,7 +192,6 @@ static void add_stream(OutputStream *ost, AVFormatContext *oc, AVCodec **codec, 
             c->mb_decision = 2;
         }
         
-        printf("Set tune %d (28 = H264)\n", codec_id);
         //av_opt_set(c->priv_data, "preset", "ultrafast", 0);
         av_opt_set(c->priv_data, "tune", "zerolatency", 0);
     break;
@@ -214,23 +201,21 @@ static void add_stream(OutputStream *ost, AVFormatContext *oc, AVCodec **codec, 
     }
 
     /* Some formats want stream headers to be separate. */
-    if (oc->oformat->flags & AVFMT_GLOBALHEADER)
+    if (oc->oformat->flags & AVFMT_GLOBALHEADER) {
         c->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    }
+    
+    return STATUS_CODE_OK;
 }
 
-/**************************************************************/
-/* audio output */
-
-static AVFrame *alloc_audio_frame(enum AVSampleFormat sample_fmt,
-                                  uint64_t channel_layout,
-                                  int sample_rate, int nb_samples)
-{
+static AVFrame *alloc_audio_frame(enum AVSampleFormat sample_fmt, uint64_t channel_layout, int sample_rate, int nb_samples) {
+    
     AVFrame *frame = av_frame_alloc();
     int ret;
 
     if (!frame) {
-        fprintf(stderr, "Error allocating an audio frame\n");
-        exit(1);
+        printf("Can't allocate audio frame.\n");
+        return NULL;
     }
 
     frame->format = sample_fmt;
@@ -241,16 +226,16 @@ static AVFrame *alloc_audio_frame(enum AVSampleFormat sample_fmt,
     if (nb_samples) {
         ret = av_frame_get_buffer(frame, 0);
         if (ret < 0) {
-            fprintf(stderr, "Error allocating an audio buffer\n");
-            exit(1);
+            printf("Can't allocate audio buffer.\n");
+            return NULL;
         }
     }
 
     return frame;
 }
 
-static void open_audio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg)
-{
+static int open_audio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AVDictionary *opt_arg) {
+    
     AVCodecContext *c;
     int nb_samples;
     int ret;
@@ -263,15 +248,9 @@ static void open_audio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, A
     ret = avcodec_open2(c, codec, &opt);
     av_dict_free(&opt);
     if (ret < 0) {
-        fprintf(stderr, "Could not open audio codec: %s\n", av_err2str(ret));
-        exit(1);
+        fprintf(stderr, "[open_audio] Could not open audio codec: %s.\n", av_err2str(ret));
+        return STATUS_CODE_NOK;
     }
-
-    /* init signal generator */
-    ost->t     = 0;
-    ost->tincr = 2 * M_PI * 110.0 / c->sample_rate;
-    /* increment frequency by 110 Hz per second */
-    ost->tincr2 = 2 * M_PI * 110.0 / c->sample_rate / c->sample_rate;
 
     if (c->codec->capabilities & AV_CODEC_CAP_VARIABLE_FRAME_SIZE)
         nb_samples = 10000;
@@ -286,35 +265,11 @@ static void open_audio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, A
     /* copy the stream parameters to the muxer */
     ret = avcodec_parameters_from_context(ost->st->codecpar, c);
     if (ret < 0) {
-        fprintf(stderr, "Could not copy the stream parameters\n");
+        printf("[open_audio] Could not copy the stream parameters.\n");
         exit(1);
     }
-
-    /* create resampler context */
-        ost->swr_ctx = swr_alloc();
-        if (!ost->swr_ctx) {
-            fprintf(stderr, "Could not allocate resampler context\n");
-            exit(1);
-        }
-
-        /* set options */
-        av_opt_set_int       (ost->swr_ctx, "in_channel_count",   c->channels,       0);
-        av_opt_set_int       (ost->swr_ctx, "in_sample_rate",     c->sample_rate,    0);
-        av_opt_set_sample_fmt(ost->swr_ctx, "in_sample_fmt",      AV_SAMPLE_FMT_S16, 0);
-        av_opt_set_int       (ost->swr_ctx, "out_channel_count",  c->channels,       0);
-        av_opt_set_int       (ost->swr_ctx, "out_sample_rate",    c->sample_rate,    0);
-        av_opt_set_sample_fmt(ost->swr_ctx, "out_sample_fmt",     c->sample_fmt,     0);
-
-    
-        /* initialize the resampling context */
-        if ((ret = swr_init(ost->swr_ctx)) < 0) {
-            fprintf(stderr, "Failed to initialize the resampling context\n");
-            exit(1);
-        }
 }
 
-/* Prepare a 16 bit dummy audio frame of 'frame_size' samples and
- * 'nb_channels' channels. */
 static AVFrame *get_audio_frame(OutputStream *ost)
 {
     
@@ -337,10 +292,6 @@ static AVFrame *get_audio_frame(OutputStream *ost)
             if (micFrameFinished) {
                 //printf("Stream (mic): Sample rate: %d, Channel layout: %d, Channels: %d, Samples: %d\n", decoded_frame->sample_rate, decoded_frame->channel_layout, decoded_frame->channels, decoded_frame->nb_samples);
                 src_data = decoded_frame->data;
-                
-                //dst_nb_samples = 1152;
-                float tincr = 1.0 / src_rate;
-                t += (tincr * src_nb_samples);
                 
                 //ret = swr_convert(swr_ctx, decoded_frame->data, dst_nb_samples, (const uint8_t **)src_data, src_nb_samples);
                 // Use swr_convert() as FIFO: Put in some data
@@ -594,18 +545,14 @@ static int write_video_frame(AVFormatContext *oc, OutputStream *ost)
     return (frame || got_packet) ? 0 : 1;
 }
 
-static void close_stream(AVFormatContext *oc, OutputStream *ost)
-{
+static void close_stream(AVFormatContext *oc, OutputStream *ost) {
     avcodec_free_context(&ost->enc);
     av_frame_free(&ost->frame);
     av_frame_free(&ost->tmp_frame);
     sws_freeContext(ost->sws_ctx);
-    swr_free(&ost->swr_ctx);
 }
 
-int main(int argc, char **argv) {
-    
-    const char *url = "udp://127.0.0.1:1234";
+int sender_initialize(char *url) {
     
     Container container = { 0 };
     OutputStream video_st = { 0 }, audio_st = { 0 };
@@ -628,7 +575,8 @@ int main(int argc, char **argv) {
     // Allocate the output media context (mpeg-ts container)
     avformat_alloc_output_context2(&outputContext, NULL, "mpegts", url);
     if (!outputContext) {
-        return STATUS_CODE_NOK;
+        printf("[sender_initialize] Can't allocate output context.\n");
+        return STATUS_CODE_CANT_ALLOCATE;
     }
 
     outputFormat = outputContext->oformat;
@@ -658,19 +606,19 @@ int main(int argc, char **argv) {
 
     av_dump_format(outputContext, 0, url, 1);
 
-    /* open the output file, if needed */
+    // Open the output
     if (!(outputFormat->flags & AVFMT_NOFILE)) {
         ret = avio_open(&outputContext->pb, url, AVIO_FLAG_WRITE);
         if (ret < 0) {
-            fprintf(stderr, "[main] Could not open '%s': %s\n", url, av_err2str(ret));
-            return STATUS_CODE_NOK;
+            printf("[sender_initialize] Can't open '%s': %s.\n", url, av_err2str(ret));
+            return STATUS_CODE_CANT_ALLOCATE;
         }
     }
 
-    /* Write the stream header, if any. */
+    // Write the stream header
     ret = avformat_write_header(outputContext, &opt);
     if (ret < 0) {
-        fprintf(stderr, "[main] Error occurred when opening output file: %s\n", av_err2str(ret));
+        fprintf(stderr, "[sender_initialize] Can't write header: %s.\n", av_err2str(ret));
         return STATUS_CODE_NOK;
     }
     
@@ -682,12 +630,12 @@ int main(int argc, char **argv) {
     av_dict_set(&pCamOpt, "video_size", "640x480", 0);
     av_dict_set(&pCamOpt, "framerate", "30", 0);
     if (avformat_open_input(&pCamFormatCtx, pCamName, pCamInputFormat, &pCamOpt) != 0) {
-        printf("Camera: Can't open format\n");
-        return -1;
+        printf("[sender_initialize] Camera: Can't open format.\n");
+        return STATUS_CODE_NOK;
     }
     if (avformat_find_stream_info(pCamFormatCtx, NULL) < 0) {
-        printf("Camera: Can't find stream information\n");
-        return -1;
+        printf("[sender_initialize] Camera: Can't find stream information.\n");
+        return STATUS_CODE_NOK;
     }
     av_dump_format(pCamFormatCtx, 0, pCamName, 0);
     for(int i=0; i<pCamFormatCtx->nb_streams; i++) {
@@ -696,26 +644,25 @@ int main(int argc, char **argv) {
             break;
         }
     }
-    printf("Camera video stream index: %d\n", camVideoStreamIndex);
     if (camVideoStreamIndex == -1) {
-        return -1;
+        return STATUS_CODE_NOK;
     }
 
     pCamCodec = avcodec_find_decoder(pCamFormatCtx->streams[camVideoStreamIndex]->codecpar->codec_id);
     if (pCamCodec==NULL) {
-        printf("Codec %d not found\n", pCamFormatCtx->streams[camVideoStreamIndex]->codecpar->codec_id);
-        return -1;
+        printf("[sender_initialize] Codec %d not found.\n", pCamFormatCtx->streams[camVideoStreamIndex]->codecpar->codec_id);
+        return STATUS_CODE_NOK;
     }
     
     pCamCodecCtx = avcodec_alloc_context3(pCamCodec);
     if (avcodec_parameters_to_context(pCamCodecCtx, pCamFormatCtx->streams[camVideoStreamIndex]->codecpar) < 0) {
-        printf("Failed to copy video codec parameters to decoder context.\n");
+        printf("[sender_initialize] Failed to copy video codec parameters to decoder context.\n");
         return STATUS_CODE_CANT_COPY_CODEC;
     }
     
     if (avcodec_open2(pCamCodecCtx, pCamCodec, NULL) < 0) {
-        printf("Can't open camera codec\n");
-        return -1;
+        printf("[sender_initialize] Can't open camera codec.\n");
+        return STATUS_CODE_CANT_OPEN;
     }
     pCamFrame = av_frame_alloc();
     
@@ -725,19 +672,16 @@ int main(int argc, char **argv) {
                                     video_st.enc->pix_fmt,
                                     SWS_BICUBIC, NULL, NULL, NULL);
     if (!pCamSwsContext) {
-        printf("Could not initialize the conversion context\n");
-        exit(-1);
+        printf("[sender_initialize] Could not initialize the conversion context.\n");
+        return STATUS_CODE_NOK;
     }
     
     uint8_t *picbuf;
-    
-    int picbuf_size = av_image_get_buffer_size(
-                                            video_st.enc->pix_fmt,
-                                            video_st.enc->width,
-                                            video_st.enc->height, 16);
-    
+    int picbuf_size = av_image_get_buffer_size(video_st.enc->pix_fmt,
+                                               video_st.enc->width,
+                                               video_st.enc->height,
+                                               16);
     picbuf = (uint8_t*)av_malloc(picbuf_size);
-    // convert picture to dest format
     newpicture = av_frame_alloc();
     
     av_image_fill_arrays (newpicture->data, newpicture->linesize, picbuf, video_st.enc->pix_fmt, video_st.enc->width, video_st.enc->height, 1);
@@ -748,12 +692,12 @@ int main(int argc, char **argv) {
     pMicFormatCtx = avformat_alloc_context();
     pMicInputFormat = av_find_input_format("avfoundation");
     if (avformat_open_input(&pMicFormatCtx, pMicName, pMicInputFormat, &pMicOpt) != 0) {
-        printf("Mic: Can't open format\n");
-        return -1;
+        printf("[sender_initialize] Mic: Can't open format.\n");
+        return STATUS_CODE_NOK;
     }
     if (avformat_find_stream_info(pMicFormatCtx, NULL) < 0) {
-        printf("Mic: Can't find stream information\n");
-        return -1;
+        printf("[sender_initialize] Mic: Can't find stream information.\n");
+        return STATUS_CODE_NOK;
     }
     av_dump_format(pMicFormatCtx, 0, pMicName, 0);
     for(int i=0; i<pMicFormatCtx->nb_streams; i++) {
@@ -762,83 +706,87 @@ int main(int argc, char **argv) {
             break;
         }
     }
-    printf("Audio stream index: %d\n", camAudioStreamIndex);
     if (camAudioStreamIndex == -1) {
-        return -1;
+        return STATUS_CODE_NOK;
     }
     
     pMicCodec = avcodec_find_decoder(pMicFormatCtx->streams[camAudioStreamIndex]->codecpar->codec_id);
     if (pCamCodec==NULL) {
-        printf("Codec %d not found\n", pMicFormatCtx->streams[camAudioStreamIndex]->codecpar->codec_id);
-        return -1;
+        printf("[sender_initialize] Codec %d not found.\n", pMicFormatCtx->streams[camAudioStreamIndex]->codecpar->codec_id);
+        return STATUS_CODE_NOK;
     }
     
     pMicCodecCtx = avcodec_alloc_context3(pMicCodec);
     if (avcodec_parameters_to_context(pMicCodecCtx, pMicFormatCtx->streams[camAudioStreamIndex]->codecpar) < 0) {
-        printf("Failed to copy audio codec parameters to decoder context.\n");
+        printf("[sender_initialize] Failed to copy audio codec parameters to decoder context.\n");
         return STATUS_CODE_CANT_COPY_CODEC;
     }
     
     if (avcodec_open2(pMicCodecCtx, pMicCodec, NULL) < 0) {
-        printf("Can't open audio codec\n");
-        return -1;
+        printf("[sender_initialize] Can't open audio codec\n");
+        return STATUS_CODE_CANT_OPEN;
     }
     
     decoded_frame = av_frame_alloc();
     if (!decoded_frame) {
-        fprintf(stderr, "Could not allocate audio frame\n");
-        exit(1);
+        printf("[sender_initialize] Could not allocate audio frame.\n");
+        return STATUS_CODE_CANT_ALLOCATE;
     }
     
+    // Output
+    // Channel layout: 3 = STEREO (LEFT | RIGHT)
+    // Sample rate: 44100
+    // Sample format: 1 = AV_SAMPLE_FMT_S16
+    int64_t dst_channel_layout = AV_CH_LAYOUT_STEREO;
+    int dst_sample_rate = 44100;
+    enum AVSampleFormat dst_sample_fmt = AV_SAMPLE_FMT_S16;
+    
     final_frame = av_frame_alloc();
+    final_frame->channel_layout = dst_channel_layout;
+    final_frame->sample_rate = dst_sample_rate;
     final_frame->format = dst_sample_fmt;
-    final_frame->channel_layout = dst_ch_layout;
-    final_frame->sample_rate = dst_rate;
     final_frame->nb_samples = 1152;
-    int ret2 = av_frame_get_buffer(final_frame, 0);
-    if (ret2 < 0) {
-        fprintf(stderr, "Error allocating an audio buffer\n");
-        exit(1);
+    ret = av_frame_get_buffer(final_frame, 0);
+    if (ret < 0) {
+        printf("[sender_initialize] Error allocating an audio buffer.\n");
+        return STATUS_CODE_NOK;
     }
     
     /* create resampler context */
     swr_ctx = swr_alloc();
     if (!swr_ctx) {
-        fprintf(stderr, "Could not allocate resampler context\n");
+        printf("[sender_initialize] Could not allocate resampler context.\n");
         ret = AVERROR(ENOMEM);
-        // TODO: Handle all exist() calls
-        exit(-1);
+        return STATUS_CODE_NOK;
     }
     
+    // Input
     // Channel layout: 3 = STEREO (LEFT | RIGHT)
     // Sample rate: 44100
     // Sample format: 3 = AV_SAMPLE_FMT_FLT
     av_opt_set_int(swr_ctx, "in_channel_layout",    pMicCodecCtx->channel_layout, 0);
     av_opt_set_int(swr_ctx, "in_sample_rate",       pMicCodecCtx->sample_rate, 0);
     av_opt_set_sample_fmt(swr_ctx, "in_sample_fmt", pMicCodecCtx->sample_fmt, 0);
-    
-    av_opt_set_int(swr_ctx, "out_channel_layout",    dst_ch_layout, 0);
-    av_opt_set_int(swr_ctx, "out_sample_rate",       dst_rate, 0);
+    av_opt_set_int(swr_ctx, "out_channel_layout",    dst_channel_layout, 0);
+    av_opt_set_int(swr_ctx, "out_sample_rate",       dst_sample_rate, 0);
     av_opt_set_sample_fmt(swr_ctx, "out_sample_fmt", dst_sample_fmt, 0);
     
-    /* initialize the resampling context */
+    // Initialize the resampling context
     if ((ret = swr_init(swr_ctx)) < 0) {
-        fprintf(stderr, "Failed to initialize the resampling context\n");
-        exit(-1);
+        printf("[sender_initialize] Failed to initialize the resampling context.\n");
+        return STATUS_CODE_NOK;
     }
     
     write_mutex = SDL_CreateMutex();
-    
     
     container.outputStream = &audio_st;
     container.formatContext = outputContext;
     audio_thread = SDL_CreateThread(write_audio, "write_audio", &container);
     
-    while (encode_video || encode_audio) {
+    while (encode_video) {
         encode_video = !write_video_frame(outputContext, &video_st);
     }
-    printf("AFTER LOOP\n");
-
+    
     /* Write the trailer, if any. The trailer must be written before you
      * close the CodecContexts open when you wrote the header; otherwise
      * av_write_trailer() may try to use memory that was freed on
@@ -859,4 +807,8 @@ int main(int argc, char **argv) {
     avformat_free_context(outputContext);
 
     return 0;
+}
+
+int main(int argc, char* argv[]) {
+    return sender_initialize("udp://127.0.0.1:1234");
 }
