@@ -70,7 +70,7 @@ typedef struct OutputStream {
 
     /* pts of the next frame that will be generated */
     int64_t next_pts;
-    int samples_count;
+    //int samples_count;
 
     AVFrame *frame;
 
@@ -248,6 +248,9 @@ static int open_audio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AV
     /* open it */
     av_dict_copy(&opt, opt_arg, 0);
     ret = avcodec_open2(c, codec, &opt);
+    
+    printf("AAA: %d\n", c->frame_size);
+    
     av_dict_free(&opt);
     if (ret < 0) {
         fprintf(stderr, "[open_audio] Could not open audio codec: %s.\n", av_err2str(ret));
@@ -299,13 +302,14 @@ static AVFrame *get_audio_frame(OutputStream *ost) {
                     outSamples = swr_get_out_samples(swr_ctx, 0);
                     // 2 = channels of dest
                     // 1152 = frame_size of dest
-                    if (outSamples < 1152 * 2) {
+                    int nb_channels = av_get_channel_layout_nb_channels(ost->enc->channel_layout);
+                    int nb_samples = final_frame->nb_samples;
+                    if (outSamples < nb_channels * nb_samples) {
                         // We don't have enough samples yet. Continue reading frames.
                         break;
                     }
                     // We got enough samples. Convert to destination format
-                    outSamples = swr_convert(swr_ctx, final_frame->data, 1152, NULL, 0);
-                    final_frame->nb_samples = 1152;
+                    outSamples = swr_convert(swr_ctx, final_frame->data, final_frame->nb_samples, NULL, 0);
                     final_frame->pts = ost->next_pts;
                     ost->next_pts += final_frame->nb_samples;
                     return final_frame;
@@ -328,7 +332,7 @@ static int write_audio_frame(AVFormatContext *oc, OutputStream *ost) {
 
     frame = get_audio_frame(ost);
 
-    ost->samples_count += 1152;
+    //ost->samples_count += 1152;
     
 //    if (frame) {
 //        /* convert samples from native format to destination codec format, using the resampler */
@@ -693,26 +697,27 @@ int sender_initialize(char *url) {
         return STATUS_CODE_CANT_ALLOCATE;
     }
     
-    // Output
+    // AUDIO: Output
     // Channel layout: 3 = STEREO (LEFT | RIGHT)
     // Sample rate: 44100
     // Sample format: 1 = AV_SAMPLE_FMT_S16
+    // Number of samples per channel: 1152 (for mp2) from output stream encoder
     int64_t dst_channel_layout = AV_CH_LAYOUT_STEREO;
     int dst_sample_rate = 44100;
     enum AVSampleFormat dst_sample_fmt = AV_SAMPLE_FMT_S16;
+    int nb_samples = audio_st.enc->frame_size;
     
     final_frame = av_frame_alloc();
     final_frame->channel_layout = dst_channel_layout;
     final_frame->sample_rate = dst_sample_rate;
     final_frame->format = dst_sample_fmt;
-    final_frame->nb_samples = 1152;
+    final_frame->nb_samples = audio_st.enc->frame_size;
     ret = av_frame_get_buffer(final_frame, 0);
     if (ret < 0) {
         printf("[sender_initialize] Error allocating an audio buffer.\n");
         return STATUS_CODE_NOK;
     }
-    
-    /* create resampler context */
+    // Create resampler context
     swr_ctx = swr_alloc();
     if (!swr_ctx) {
         printf("[sender_initialize] Could not allocate resampler context.\n");
@@ -720,7 +725,7 @@ int sender_initialize(char *url) {
         return STATUS_CODE_NOK;
     }
     
-    // Input
+    // AUDIO: Input
     // Channel layout: 3 = STEREO (LEFT | RIGHT)
     // Sample rate: 44100
     // Sample format: 3 = AV_SAMPLE_FMT_FLT
