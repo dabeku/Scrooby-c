@@ -4,7 +4,7 @@
 
 /*
  * TODO:
- * - Remove constants: nb_samples, 1152, 3000, 44100, etc.
+ * - Remove constants: nb_samples, 44100, etc.
  */
 #include <stdlib.h>
 #include <stdio.h>
@@ -22,16 +22,17 @@
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 
-#include <SDL2/SDL.h>
 #include <SDL2/SDL_thread.h>
 
 #include "scr-statuscode.h"
 #include "scr-utility.h"
 
-#define STREAM_FRAME_RATE 25 /* 25 images/s */
-#define STREAM_PIX_FMT    AV_PIX_FMT_YUV420P /* default pix_fmt */
-
 #define SCALE_FLAGS SWS_BICUBIC
+
+// Config section
+int cfg_framerate = 0;
+int cfg_width = 0;
+int cfg_height = 0;
 
 SDL_mutex *write_mutex = NULL;
 SDL_Thread *audio_thread = NULL;
@@ -173,17 +174,17 @@ static int add_stream(OutputStream *ost, AVFormatContext *oc, AVCodec **codec, e
 
         c->bit_rate = 400000;
         /* Resolution must be a multiple of two. */
-        c->width    = 640;
-        c->height   = 480;
+        c->width    = cfg_width;
+        c->height   = cfg_height;
         /* timebase: This is the fundamental unit of time (in seconds) in terms
          * of which frame timestamps are represented. For fixed-fps content,
          * timebase should be 1/framerate and timestamp increments should be
          * identical to 1. */
-        ost->st->time_base = (AVRational){ 1, STREAM_FRAME_RATE };
+        ost->st->time_base = (AVRational){ 1, cfg_framerate };
         c->time_base       = ost->st->time_base;
 
         //c->gop_size      = 12; /* emit one intra frame every twelve frames at most */
-        c->pix_fmt       = STREAM_PIX_FMT;
+        c->pix_fmt       = AV_PIX_FMT_YUV420P;
         if (c->codec_id == AV_CODEC_ID_MPEG2VIDEO) {
             /* just for testing, we also add B-frames */
             c->max_b_frames = 2;
@@ -248,8 +249,6 @@ static int open_audio(AVFormatContext *oc, AVCodec *codec, OutputStream *ost, AV
     /* open it */
     av_dict_copy(&opt, opt_arg, 0);
     ret = avcodec_open2(c, codec, &opt);
-    
-    printf("AAA: %d\n", c->frame_size);
     
     av_dict_free(&opt);
     if (ret < 0) {
@@ -325,43 +324,11 @@ static int write_audio_frame(AVFormatContext *oc, OutputStream *ost) {
     AVFrame *frame;
     int ret;
     int got_packet;
-    //int dst_nb_samples;
 
     av_init_packet(&pkt);
     c = ost->enc;
 
     frame = get_audio_frame(ost);
-
-    //ost->samples_count += 1152;
-    
-//    if (frame) {
-//        /* convert samples from native format to destination codec format, using the resampler */
-//            /* compute destination number of samples */
-//            dst_nb_samples = av_rescale_rnd(swr_get_delay(ost->swr_ctx, c->sample_rate) + frame->nb_samples,
-//                                            c->sample_rate, c->sample_rate, AV_ROUND_UP);
-//            av_assert0(dst_nb_samples == frame->nb_samples);
-//
-//        /* when we pass a frame to the encoder, it may keep a reference to it
-//         * internally;
-//         * make sure we do not overwrite it here
-//         */
-//        ret = av_frame_make_writable(ost->frame);
-//        if (ret < 0)
-//            exit(1);
-//
-//        /* convert to destination format */
-//        ret = swr_convert(ost->swr_ctx,
-//                          ost->frame->data, dst_nb_samples,
-//                          (const uint8_t **)frame->data, frame->nb_samples);
-//        if (ret < 0) {
-//            fprintf(stderr, "Error while converting\n");
-//            exit(1);
-//        }
-//        frame = ost->frame;
-//
-//        frame->pts = av_rescale_q(ost->samples_count, (AVRational){1, c->sample_rate}, c->time_base);
-//        ost->samples_count += dst_nb_samples;
-//    }
 
     ret = encode(c, frame, &pkt, &got_packet);
     if (ret < 0) {
@@ -463,11 +430,11 @@ static AVFrame *get_video_frame(OutputStream *ost) {
                         newpicture->format = c->pix_fmt;
             
             ost->frame = newpicture;
-            // TODO: Make this variable
-            ost->next_pts = ost->next_pts + 3000; // For 30 fps
-            //ost->next_pts = (1.0 / 30) * 90000
+
+            // This is mpegts specific
+            int64_t pts_diff = (1.0 / cfg_framerate) * 90000;
+            ost->next_pts = ost->next_pts + pts_diff;
             ost->frame->pts = ost->next_pts;
-            
             return ost->frame;
         }
     }
@@ -516,7 +483,12 @@ static void close_stream(AVFormatContext *oc, OutputStream *ost) {
     sws_freeContext(ost->sws_ctx);
 }
 
-int sender_initialize(char *url) {
+int sender_initialize(char* url, int width, int height, int framerate) {
+    
+    // Config section
+    cfg_framerate = framerate;
+    cfg_width = width;
+    cfg_height = height;
     
     Container container = { 0 };
     OutputStream video_st = { 0 }, audio_st = { 0 };
@@ -548,7 +520,8 @@ int sender_initialize(char *url) {
     // Add the audio and video streams.
     if (outputFormat->video_codec != AV_CODEC_ID_NONE) {
         // Default: outputFormat->video_codec (=2, AV_CODEC_ID_MPEG2VIDEO) instead of AV_CODEC_ID_H264 (=28)
-        add_stream(&video_st, outputContext, &video_codec, AV_CODEC_ID_H264);
+        //add_stream(&video_st, outputContext, &video_codec, AV_CODEC_ID_H264);
+        add_stream(&video_st, outputContext, &video_codec, AV_CODEC_ID_MPEG2VIDEO);
         have_video = 1;
         encode_video = 1;
     }
@@ -589,10 +562,11 @@ int sender_initialize(char *url) {
     /*
      * Video
      */
+    
     pCamFormatCtx = avformat_alloc_context();
     pCamInputFormat = av_find_input_format("avfoundation");
-    av_dict_set(&pCamOpt, "video_size", "640x480", 0);
-    av_dict_set(&pCamOpt, "framerate", "30", 0);
+    av_dict_set(&pCamOpt, "video_size", concat(concat(int_to_str(width), "x"), int_to_str(height)), 0);
+    av_dict_set(&pCamOpt, "framerate", int_to_str(framerate), 0);
     if (avformat_open_input(&pCamFormatCtx, pCamName, pCamInputFormat, &pCamOpt) != 0) {
         printf("[sender_initialize] Camera: Can't open format.\n");
         return STATUS_CODE_NOK;
@@ -601,6 +575,7 @@ int sender_initialize(char *url) {
         printf("[sender_initialize] Camera: Can't find stream information.\n");
         return STATUS_CODE_NOK;
     }
+    
     av_dump_format(pCamFormatCtx, 0, pCamName, 0);
     for(int i=0; i<pCamFormatCtx->nb_streams; i++) {
         if(pCamFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
@@ -711,7 +686,7 @@ int sender_initialize(char *url) {
     final_frame->channel_layout = dst_channel_layout;
     final_frame->sample_rate = dst_sample_rate;
     final_frame->format = dst_sample_fmt;
-    final_frame->nb_samples = audio_st.enc->frame_size;
+    final_frame->nb_samples = nb_samples;
     ret = av_frame_get_buffer(final_frame, 0);
     if (ret < 0) {
         printf("[sender_initialize] Error allocating an audio buffer.\n");
@@ -775,5 +750,5 @@ int sender_initialize(char *url) {
 }
 
 int main(int argc, char* argv[]) {
-    return sender_initialize("udp://127.0.0.1:1234");
+    return sender_initialize("udp://127.0.0.1:1234", 640, 480, 30);
 }

@@ -67,3 +67,25 @@ int decode(AVCodecContext *avctx, AVFrame *frame, AVPacket *pkt, int *got_frame)
     
     return 0;
 }
+
+int str_to_int(char* num) {
+    int dec = 0, i, len;
+    len = strlen(num);
+    for(i=0; i<len; i++){
+        dec = dec * 10 + ( num[i] - '0' );
+    }
+    return dec;
+}
+
+char* int_to_str(int num) {
+    char* str = calloc(32, sizeof(char));
+    sprintf(str, "%d", num);
+    return str;
+}
+
+char* concat(const char *str1, const char *str2) {
+    char *result = malloc(strlen(str1)+strlen(str2)+1); //+1 for the zero-terminator
+    strcpy(result, str1);
+    strcat(result, str2);
+    return result;
+}

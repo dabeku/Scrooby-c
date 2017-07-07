@@ -361,7 +361,7 @@ int frame_to_jpeg(VideoState *is, AVFrame *frame, int frameNo) {
     
     AVPacket packet = {.data = NULL, .size = 0};
     av_init_packet(&packet);
-    //int gotFrame;
+
     av_dump_format(is->pFormatCtx, 0, "", 0);
     int got_frame = 0;
     
@@ -369,13 +369,13 @@ int frame_to_jpeg(VideoState *is, AVFrame *frame, int frameNo) {
         return -1;
     }
     
-    sprintf(JPEGFName, "dvr-%06d.jpg", frameNo);
+    //sprintf(JPEGFName, "dvr-%06d.jpg", frameNo);
     
-    JPEGFile = fopen(JPEGFName, "wb");
-    fwrite(packet.data, 1, packet.size, JPEGFile);
-    fclose(JPEGFile);
+    //JPEGFile = fopen(JPEGFName, "wb");
+    //fwrite(packet.data, 1, packet.size, JPEGFile);
+    //fclose(JPEGFile);
     
-    network_send_udp(packet.data, packet.size);
+    //network_send_udp(packet.data, packet.size);
     
     av_packet_unref(&packet);
     avcodec_close(jpegContext);
@@ -552,8 +552,6 @@ int decode_thread(void *arg) {
     
     VideoState *is = (VideoState *)arg;
     AVFormatContext *pFormatCtx = NULL;
-    //AVCodecContext *pCodecCtx = NULL;
-    //AVCodec *pCodec = NULL;
     AVPacket pkt1;
     AVPacket *packet = &pkt1;
     
