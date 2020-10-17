@@ -29,6 +29,9 @@
 #include "scr-utility.h"
 #include "scr-network.h"
 
+// Global config section
+#define CFG_ENABLE_AUDIO 0
+
 #define FF_REFRESH_EVENT (SDL_USEREVENT)
 #define FF_QUIT_EVENT (SDL_USEREVENT + 1)
 
@@ -405,7 +408,7 @@ int video_thread(void *arg) {
         if ( ret < 0 ) {
             printf("Error in decoding video frame.\n");
             av_packet_unref(packet);
-            return -1;
+            continue;
         }
         
         // Did we get a video frame?
@@ -507,12 +510,12 @@ int stream_component_open(VideoState *is, int stream_index) {
             SDL_PauseAudio(0);
             break;
         case AVMEDIA_TYPE_VIDEO:
-            
+
             if (pCodecCtx->width == 0 || pCodecCtx->height == 0) {
                 printf("[stream_component_open] Can't find codec information: width and height\n");
                 return STATUS_CODE_MISSING_VIDEO_CODEC_INFO;
             }
-            
+
             is->videoStream = stream_index;
             is->video_st = pFormatCtx->streams[stream_index];
             is->video_ctx = pCodecCtx;
@@ -560,15 +563,15 @@ int decode_thread(void *arg) {
     int i = 0;
     is->videoStream = -1;
     global_video_state = is;
-    
+
     int isInitialized = 0;
     while (isInitialized == 0) {
         
         printf("[decode_thread] Start initialization\n");
         
         AVInputFormat *inputFormat = av_find_input_format("mpegts");
-        
-        result = avformat_open_input(&pFormatCtx, is->url, inputFormat, NULL);
+
+        result = avformat_open_input(&pFormatCtx, is->url, NULL, NULL);
         if (result != 0) {
             printf("[decode_thread] Error: Can't open input.\n");
             return -1;
@@ -597,7 +600,7 @@ int decode_thread(void *arg) {
                 video_index < 0) {
                 video_index = i;
             }
-            if (pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO &&
+            if (CFG_ENABLE_AUDIO && pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO &&
                 audio_index < 0) {
                 audio_index=i;
             }
@@ -613,7 +616,7 @@ int decode_thread(void *arg) {
             avformat_close_input(&pFormatCtx);
             continue;
         }
-        if (audio_index < 0) {
+        if (CFG_ENABLE_AUDIO && audio_index < 0) {
             printf("[decode_thread] Could not find a audio stream.\n");
             avformat_close_input(&pFormatCtx);
             continue;
@@ -625,12 +628,15 @@ int decode_thread(void *arg) {
             avformat_close_input(&pFormatCtx);
             continue;
         }
-        result = stream_component_open(is, audio_index);
-        if (result < 0) {
-            printf("[decode_thread] Could not open video: %d.\n", result);
-            avformat_close_input(&pFormatCtx);
-            continue;
+        if (CFG_ENABLE_AUDIO) {
+            result = stream_component_open(is, audio_index);
+            if (result < 0) {
+                printf("[decode_thread] Could not open video: %d.\n", result);
+                avformat_close_input(&pFormatCtx);
+                continue;
+            }
         }
+        
         
         // We have all we need
         isInitialized = 1;
@@ -734,7 +740,7 @@ int initialize(char *url) {
     is = av_mallocz(sizeof(VideoState));
     
     // Disable ffmpeg log
-    av_log_set_level(AV_LOG_QUIET);
+    //av_log_set_level(AV_LOG_QUIET);
     
     // Register all formats and codecs
     av_register_all();
@@ -790,5 +796,7 @@ int initialize(char *url) {
 }
 
 int main(int argc, char* argv[]) {
-    return initialize("udp://127.0.0.1:1234?overrun_nonfatal=1");
+    //return initialize("udp://127.0.0.1:1234?overrun_nonfatal=1");
+    return initialize("udp://192.168.178.20:1234?overrun_nonfatal=1");
+	//return initialize("/Users/gwen/Downloads/Scrooby-c/test.ts");
 }
