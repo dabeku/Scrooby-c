@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <unistd.h>
 
 #include <libavutil/avassert.h>
 #include <libavutil/channel_layout.h>
@@ -418,6 +419,11 @@ static AVFrame *get_video_frame(OutputStream *ost) {
     AVCodecContext *c = ost->enc;
     
     int ret = av_read_frame(pCamFormatCtx, &camPacket);
+    while (ret < 0) {
+        usleep(10);
+        ret = av_read_frame(pCamFormatCtx, &camPacket);
+    }
+    printf("DONE");
     if (camPacket.stream_index == camVideoStreamIndex) {
         int camFrameFinished;
         ret = decode_video(pCamCodecCtx, pCamFrame, &camPacket, &camFrameFinished);
@@ -521,16 +527,16 @@ int sender_initialize(char* url, int width, int height, int framerate) {
     if (outputFormat->video_codec != AV_CODEC_ID_NONE) {
         // Default: outputFormat->video_codec (=2, AV_CODEC_ID_MPEG2VIDEO) instead of AV_CODEC_ID_H264 (=28)
         //add_stream(&video_st, outputContext, &video_codec, AV_CODEC_ID_H264);
-        add_stream(&video_st, outputContext, &video_codec, AV_CODEC_ID_MPEG2VIDEO);
+        add_stream(&video_st, outputContext, &video_codec, AV_CODEC_ID_H264);
         have_video = 1;
         encode_video = 1;
     }
-    if (outputFormat->audio_codec != AV_CODEC_ID_NONE) {
+    /*if (outputFormat->audio_codec != AV_CODEC_ID_NONE) {
         // Default: outputFormat->audio_codec (=86016) is equal to AV_CODEC_ID_MP2 (=86016)
         add_stream(&audio_st, outputContext, &audio_codec, AV_CODEC_ID_MP2);
         have_audio = 1;
         encode_audio = 1;
-    }
+    }*/
 
     // Now that all the parameters are set, we can open the audio and
     // video codecs and allocate the necessary encode buffers.
@@ -627,7 +633,7 @@ int sender_initialize(char* url, int width, int height, int framerate) {
     
     /*
      * Audio
-     */
+     *
     pMicFormatCtx = avformat_alloc_context();
     pMicInputFormat = av_find_input_format("avfoundation");
     if (avformat_open_input(&pMicFormatCtx, pMicName, pMicInputFormat, &pMicOpt) != 0) {
@@ -715,13 +721,13 @@ int sender_initialize(char* url, int width, int height, int framerate) {
     if ((ret = swr_init(swr_ctx)) < 0) {
         printf("[sender_initialize] Failed to initialize the resampling context.\n");
         return STATUS_CODE_NOK;
-    }
+    }*/
     
     write_mutex = SDL_CreateMutex();
     
-    container.outputStream = &audio_st;
-    container.formatContext = outputContext;
-    audio_thread = SDL_CreateThread(write_audio, "write_audio", &container);
+    //container.outputStream = &audio_st;
+    //container.formatContext = outputContext;
+    //audio_thread = SDL_CreateThread(write_audio, "write_audio", &container);
     
     while (encode_video) {
         encode_video = !write_video_frame(outputContext, &video_st);
@@ -750,5 +756,5 @@ int sender_initialize(char* url, int width, int height, int framerate) {
 }
 
 int main(int argc, char* argv[]) {
-    return sender_initialize("udp://127.0.0.1:1234", 640, 480, 30);
+    return sender_initialize("udp://192.168.178.38:2004", 640, 480, 30);
 }
