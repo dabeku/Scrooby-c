@@ -22,6 +22,7 @@
 #include <libavdevice/avdevice.h>
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
+#include <libavutil/time.h>
 
 #include <SDL2/SDL_thread.h>
 
@@ -111,8 +112,8 @@ static int write_frame(AVFormatContext *fmt_ctx, const AVRational *time_base, AV
     SDL_LockMutex(write_mutex);
     /* Write the compressed frame to the media file. */
     //log_packet(fmt_ctx, pkt);
-//    return av_interleaved_write_frame(fmt_ctx, pkt);
-    int result = av_write_frame(fmt_ctx, pkt);
+    int result = av_interleaved_write_frame(fmt_ctx, pkt);
+    //int result = av_write_frame(fmt_ctx, pkt);
     
     SDL_UnlockMutex(write_mutex);
     
@@ -174,6 +175,8 @@ static int add_stream(OutputStream *ost, AVFormatContext *oc, AVCodec **codec, e
         c->codec_id = codec_id;
 
         c->bit_rate = 400000;
+        c->profile= FF_PROFILE_H264_BASELINE;
+
         /* Resolution must be a multiple of two. */
         c->width    = cfg_width;
         c->height   = cfg_height;
@@ -181,8 +184,9 @@ static int add_stream(OutputStream *ost, AVFormatContext *oc, AVCodec **codec, e
          * of which frame timestamps are represented. For fixed-fps content,
          * timebase should be 1/framerate and timestamp increments should be
          * identical to 1. */
-        ost->st->time_base = (AVRational){ 1, cfg_framerate };
-        c->time_base       = ost->st->time_base;
+        //ost->st->time_base = (AVRational){ 1, cfg_framerate };
+        //c->time_base       = ost->st->time_base;
+        c->time_base       = (AVRational){ 1, cfg_framerate };
 
         //c->gop_size      = 12; /* emit one intra frame every twelve frames at most */
         c->pix_fmt       = AV_PIX_FMT_YUV420P;
@@ -423,7 +427,6 @@ static AVFrame *get_video_frame(OutputStream *ost) {
         usleep(10);
         ret = av_read_frame(pCamFormatCtx, &camPacket);
     }
-    printf("DONE");
     if (camPacket.stream_index == camVideoStreamIndex) {
         int camFrameFinished;
         ret = decode_video(pCamCodecCtx, pCamFrame, &camPacket, &camFrameFinished);
@@ -438,15 +441,17 @@ static AVFrame *get_video_frame(OutputStream *ost) {
             ost->frame = newpicture;
 
             // This is mpegts specific
-            int64_t pts_diff = (1.0 / cfg_framerate) * 90000;
-            ost->next_pts = ost->next_pts + pts_diff;
-            ost->frame->pts = ost->next_pts;
+            //int64_t pts_diff = (1.0 / cfg_framerate) * 90000;
+            //ost->next_pts = ost->next_pts + pts_diff;
+            //ost->frame->pts = ost->next_pts;
             return ost->frame;
         }
     }
 
     return ost->frame;
 }
+
+static int64_t prevPts = 0;
 
 static int write_video_frame(AVFormatContext *oc, OutputStream *ost) {
     
@@ -460,15 +465,31 @@ static int write_video_frame(AVFormatContext *oc, OutputStream *ost) {
     frame = get_video_frame(ost);
     av_init_packet(&pkt);
 
+    // Calculate pts based on current time. 1000000 is for usec
+    int64_t now = av_gettime();
+    const AVRational codecTimebase = c->time_base;
+    int64_t rescaledNow = av_rescale_q( now, (AVRational){1, 1000000},codecTimebase);
+    frame->pts = rescaledNow; 
+
     // Encode the image
     ret = encode_video(c, frame, &pkt, &got_packet);
-    
+
     if (ret < 0) {
         printf("[write_video_frame] Error encoding video frame: %s.\n", av_err2str(ret));
         return STATUS_CODE_NOK;
     }
     
     if (got_packet) {
+        pkt.pts = av_rescale_q(pkt.pts, c->time_base, ost->st->time_base);
+        pkt.dts = av_rescale_q(pkt.dts, c->time_base, ost->st->time_base);
+        
+        // To prevent non monotonically increasing pts and dts
+        if (prevPts == pkt.pts) {
+            pkt.pts = prevPts + 1;
+            pkt.dts = prevPts + 1;
+        }
+        prevPts = pkt.pts;
+
         ret = write_frame(oc, &c->time_base, ost->st, &pkt);
         av_packet_unref(&pkt);
     } else {
@@ -477,7 +498,7 @@ static int write_video_frame(AVFormatContext *oc, OutputStream *ost) {
 
     if (ret < 0) {
         printf("[write_video_frame] Error while writing video frame: %s.\n", av_err2str(ret));
-        return STATUS_CODE_NOK;
+        //return STATUS_CODE_NOK;
     }
 
     return (frame || got_packet) ? 0 : 1;
@@ -756,5 +777,5 @@ int sender_initialize(char* url, int width, int height, int framerate) {
 }
 
 int main(int argc, char* argv[]) {
-    return sender_initialize("udp://192.168.178.38:2004", 640, 480, 30);
+    return sender_initialize("udp://192.168.178.38:9090", 640, 480, 30);
 }
